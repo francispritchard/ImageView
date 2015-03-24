@@ -695,8 +695,7 @@ BEGIN
     Beep;
     MSGMemo.Lines.Add('*** Error #10061 - Unable to Connect');
     ShowMessage('Unable to Connect to ZoomPlayer');
-//    IF TestMode THEN { +++ }
-      CloseProgram('Zoom Player');
+    CloseProgram('Zoom Player');
 //    ZoomPlayerUnitForm.Visible := True;
     ErrorCode := 0;
   END;

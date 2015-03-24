@@ -37,6 +37,8 @@ TYPE
   END;
 
 TYPE
+  FileType = (Text_File, VideoFile, ImageFile, DatabaseFile, UnspecifiedFileType);
+
   SelectedFile_Type = RECORD
                         SelectedFile_Name : String;
 
@@ -68,7 +70,10 @@ IMPLEMENTATION
 {$R *.dfm}
 {$WARN SYMBOL_PLATFORM OFF }
 
-USES FWPOnlyUnit, System.UItypes, ZoomPlayerUnit, ShellAPI, StrUtils, Registry;
+USES System.UItypes, ZoomPlayerUnit, ShellAPI, StrUtils, Registry;
+
+FUNCTION IsProgramRunning(ProgramName : String) : Boolean; External 'ListFilesDLLProject.dll'
+{ Checks to see if a given program is running }
 
 TYPE
   SortOrderType = (Ascending, Descending);
@@ -128,31 +133,155 @@ BEGIN
   Result := ' [' + IntToStr(TotalFileCount) + ' files, ' + IntToStr(EligibleFiles) + ' video files]';
 END; { GetImageViewCaptionFileNumbers }
 
-FUNCTION FindImageViewUnitFormImageNumber(FileName : String) : Integer;
-VAR
-  Done : Boolean;
-  I : Integer;
+FUNCTION FileTypeSuffixFoundMainProc(TempFileName : String; OUT FileNameWithoutSuffix : String; SuffixToFind : String; OUT SuffixFoundStr : String;
+                                     OUT SuffixPos, SuffixLength : Integer; OUT TypeOfFile : FileType) : Boolean;
+
+  FUNCTION GetPos(Str : String; TempTypeOfFile : FileType) : Boolean;
+  BEGIN
+    SuffixLength := Length(Str);
+    SuffixPos := Pos(UpperCase(Str), UpperCase(TempFileName));
+    IF SuffixPos = 0 THEN BEGIN
+      Result := False;
+      SuffixFoundStr := '';
+      FileNameWithoutSuffix := TempFileName;
+    END ELSE
+//      IF Pos('.DB', UpperCase(TempFileName)) > 0 THEN BEGIN
+//        { exclude files with .db wherever it appears in a filename }
+//        Result := True;
+//        FileNameWithoutSuffix := Copy(TempFileName, 1, SuffixPos - 1);
+//        TypeOfFile := TempTypeOfFile;
+//        SuffixFoundStr := '';
+//        SuffixPos := 0;
+//      END ELSE
+      BEGIN
+        Result := True;
+        SuffixFoundStr := Str;
+        TypeOfFile := TempTypeOfFile;
+        FileNameWithoutSuffix := Copy(TempFileName, 1, SuffixPos - 1);
+      END;
+  END; { GetPos }
 
 BEGIN
-  Result := 0;
-
-  TRY
-    I := 0;
-    Done := False;
-    WHILE (I < ImageViewUnitForm.ControlCount) AND NOT Done DO BEGIN
-      IF ImageViewUnitForm.Controls[I] IS TImage THEN BEGIN
-        IF TImage(ImageViewUnitForm.Controls[I]).Hint = FileName THEN BEGIN
-          Result := I;
-          Done := True;
-        END;
-      END;
-      Inc(I);
-    END; {WHILE}
-  EXCEPT
-    ON E : Exception DO
-      ShowMessage('FindImageOnImageViewUnitForm: ' + E.ClassName +' error raised, with message: ' + E.Message);
+  IF SuffixToFind <> '' THEN
+    GetPos(SuffixToFind, UnspecifiedFileType)
+  ELSE BEGIN
+    { the image files are deliberately first in this list, as snaps are in the format .avi.jpg and otherwise are not identified as image files }
+    IF NOT GetPos('.jpg', ImageFile) THEN
+      IF NOT GetPos('.jpeg', ImageFile) THEN
+        IF NOT GetPos('.gif', ImageFile) THEN
+          IF NOT GetPos('.pcx', ImageFile) THEN
+            IF NOT GetPos('.gif', ImageFile) THEN
+              IF NOT GetPos('.png', ImageFile) THEN
+                IF NOT GetPos('.bmp', ImageFile) THEN
+                  IF NOT GetPos('.tif', ImageFile) THEN
+                    IF NOT GetPos('.txt', Text_File) THEN
+                      IF NOT GetPos('.3gp', VideoFile) THEN
+                        IF NOT GetPos('.asf', VideoFile) THEN
+                          IF NOT GetPos('.avi', VideoFile)  THEN
+                            IF NOT GetPos('.divx', VideoFile) THEN
+                              IF NOT GetPos('.flv', VideoFile) THEN
+                                IF NOT GetPos('.mlv', VideoFile) THEN
+                                  IF NOT GetPos('.mp4', VideoFile) THEN
+                                    IF NOT GetPos('.mpeg', VideoFile) THEN
+                                      IF NOT GetPos('.mpg', VideoFile) THEN
+                                        IF NOT GetPos('.ram', VideoFile) THEN
+                                          IF NOT GetPos('.rm', VideoFile) THEN
+                                            IF NOT GetPos('.m1v', VideoFile) THEN
+                                              IF NOT GetPos('.m4v', VideoFile) THEN
+                                                IF NOT GetPos('.vlc', VideoFile) THEN
+                                                    IF NOT GetPos('.wmv', VideoFile) THEN
+                                                        GetPos('.db', DatabaseFile);
   END;
-END; { FindImageViewUnitFormImageNumber }
+
+  IF SuffixPos = 0 THEN
+    Result := False
+  ELSE
+    Result := True;
+END; { FileTypeSuffixFound }
+
+FUNCTION FileTypeSuffixFound{1}(TempFileName : String) : Boolean; Overload;
+VAR
+  FileNameWithoutSuffix : String;
+  SuffixPos : Integer;
+  SuffixLength : Integer;
+  SuffixFoundStr : String;
+  TypeOfFile : FileType;
+
+BEGIN
+  SuffixFoundStr := '';
+  IF FileTypeSuffixFoundMainProc(TempFileName, FileNameWithoutSuffix, '', SuffixFoundStr, SuffixPos, SuffixLength, TypeOfFile) THEN
+    Result := True
+  ELSE
+    Result := False;
+END; { FileTypeSuffixFound-1 }
+
+FUNCTION FileTypeSuffixFound{2}(TempFileName : String; OUT SuffixFoundStr : String) : Boolean; Overload;
+VAR
+  FileNameWithoutSuffix : String;
+  SuffixPos : Integer;
+  SuffixLength : Integer;
+  TypeOfFile : FileType;
+
+BEGIN
+  SuffixFoundStr := '';
+  IF FileTypeSuffixFoundMainProc(TempFileName, FileNameWithoutSuffix, '', SuffixFoundStr, SuffixPos, SuffixLength, TypeOfFile) THEN
+    Result := True
+  ELSE
+    Result := False;
+END; { FileTypeSuffixFound-2 }
+
+FUNCTION FileTypeSuffixFound{3}(TempFileName : String; OUT SuffixPos, SuffixLength : Integer) : Boolean; Overload;
+VAR
+  FileNameWithoutSuffix : String;
+  SuffixFoundStr : String;
+  TypeOfFile : FileType;
+
+BEGIN
+  IF FileTypeSuffixFoundMainProc(TempFileName, FileNameWithoutSuffix, '', SuffixFoundStr, SuffixPos, SuffixLength, TypeOfFile) THEN
+    Result := True
+  ELSE
+    Result := False;
+END; { FileTypeSuffixFound-3 }
+
+FUNCTION FileTypeSuffixFound{4}(TempFileName : String; SuffixToFind : String; OUT SuffixPos, SuffixLength : Integer) : Boolean; Overload;
+VAR
+  FileNameWithoutSuffix : String;
+  SuffixFoundStr : String;
+  TypeOfFile : FileType;
+
+BEGIN
+  IF FileTypeSuffixFoundMainProc(TempFileName, FileNameWithoutSuffix, SuffixToFind, SuffixFoundStr, SuffixPos, SuffixLength, TypeOfFile) THEN
+    Result := True
+  ELSE
+    Result := False;
+END; { FileTypeSuffixFound-4 }
+
+FUNCTION FileTypeSuffixFound{5}(TempFileName : String; OUT TypeOfFile : FileType) : Boolean; Overload;
+VAR
+  FileNameWithoutSuffix : String;
+  SuffixPos : Integer;
+  SuffixLength : Integer;
+  SuffixFoundStr : String;
+
+BEGIN
+  IF FileTypeSuffixFoundMainProc(TempFileName, FileNameWithoutSuffix, '', SuffixFoundStr, SuffixPos, SuffixLength, TypeOfFile) THEN
+    Result := True
+  ELSE
+    Result := False;
+END; { FileTypeSuffixFound-5 }
+
+FUNCTION FileTypeSuffixFound{6}(TempFileName : String; OUT FileNameWithoutSuffix : String; OUT TypeOfFile : FileType) : Boolean; Overload;
+VAR
+  SuffixPos : Integer;
+  SuffixLength : Integer;
+  SuffixFoundStr : String;
+
+BEGIN
+  IF FileTypeSuffixFoundMainProc(TempFileName, FileNameWithoutSuffix, '', SuffixFoundStr, SuffixPos, SuffixLength, TypeOfFile) THEN
+    Result := True
+  ELSE
+    Result := False;
+END; { FileTypeSuffixFound-6 }
 
 FUNCTION FindSpecificImageOnImageViewUnitForm(FileName : String) : TImage;
 VAR
@@ -281,11 +410,11 @@ PROCEDURE TImageViewUnitForm.ImageViewUnitFormCreate(Sender: TObject);
     StrPos : Integer;
 
   BEGIN
-    StrPos := Pos(Parameter, UpperCase(ParamStr(ParameterPos)));
+    StrPos := Pos(UpperCase(Parameter), UpperCase(ParamStr(ParameterPos)));
     IF StrPos > 0 THEN
       DirectoryStr := Copy(ParamStr(ParameterPos), Length(Parameter) + 1)
     ELSE BEGIN
-      ShowMessage('No ' + Parameter + ' parameter specified - press OK to exit');
+      ShowMessage('No ' + Parameter + ' parameter specified in command line "' + CmdLine + '" - press OK to exit');
       Application.Terminate;
     END;
   END; { CheckParameter }
@@ -1599,7 +1728,7 @@ BEGIN
       Initialised := True;
     END;
 
-    IF (LastSort = SortType) AND (SortOrder = Ascending) THEN
+    IF (LastSort = SortType) AND (SortOrder = Ascending) AND NOT Reposition THEN
       SortOrder := Descending
     ELSE
       SortOrder := Ascending;

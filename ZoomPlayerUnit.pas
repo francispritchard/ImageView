@@ -376,9 +376,9 @@ BEGIN
           IF TryStrToInt(ElapsedTimeFromTCPStr, I) THEN BEGIN
             { do not record times less than 5 seconds }
             IF I < 5 THEN
-              SnapsFileNumberRename(SelectedFile_Name, '')
+              SnapFileNumberRename(SelectedFile_Name, '')
             ELSE
-              SnapsFileNumberRename(SelectedFile_Name, ElapsedTimeFromTCPStr);
+              SnapFileNumberRename(SelectedFile_Name, ElapsedTimeFromTCPStr);
 
             { Update the last access time, as Zoom Player doesn't seem to do it }
             SetFileLastAccessTime(PathName + SelectedFile_Name, Now);

@@ -70,6 +70,7 @@ object ImageViewUnitForm: TImageViewUnitForm
     Height = 73
     Caption = 'Stop'
     TabOrder = 1
+    Visible = False
     OnClick = ImageViewUnitStopButtonClick
   end
   object ImageViewUnitFindDialog: TFindDialog

@@ -55,22 +55,27 @@ TYPE
                         SelectedFile_LastRenameFrom : String;
                         SelectedFile_LastRenameTo : String;
                         SelectedFile_NumberStr : String;
-                        SelectedFile_SnapFileName : String;
                       END;
 VAR
   ImageViewUnitForm : TImageViewUnitForm;
   PathName : String;
   SelectedFileRec : SelectedFile_Type;
 
-FUNCTION SnapsFileNumberRename(FileName, NewNumberStr : String) : Boolean;
-{ Routine for snaps file renaming }
+PROCEDURE CloseOutputFile(VAR OutputFile : Text; Filename : String); External 'ListFilesDLLProject.dll';
+{ Close an output file, capturing the error message if any }
+
+FUNCTION SnapFileNumberRename(FileName, NewNumberStr : String) : Boolean;
+{ Routine for snap file renaming }
+
+FUNCTION OpenOutputFileOK(VAR OutputFilename : Text; Filename : String; OUT ErrorMsg : String; AppendToFile : Boolean) : Boolean; External 'ListFilesDLLProject.dll';
+{ Open (and create if necessary) a file }
 
 IMPLEMENTATION
 
 {$R *.dfm}
 {$WARN SYMBOL_PLATFORM OFF }
 
-USES System.UItypes, ZoomPlayerUnit, ShellAPI, StrUtils, Registry;
+USES System.UItypes, ZoomPlayerUnit, ShellAPI, StrUtils, Registry, ImageViewSplash;
 
 FUNCTION IsProgramRunning(ProgramName : String) : Boolean; External 'ListFilesDLLProject.dll'
 { Checks to see if a given program is running }
@@ -104,6 +109,7 @@ VAR
   SaveFileFoundPosition : Integer;
   SaveVertSCrollBarRange : Integer = 2000;
   SortOrder : SortOrderType;
+  SortStr : String = '';
   TestCount : Integer = 0;
   TotalFileCount : Integer = 0;
   VLC : Boolean = False;
@@ -124,7 +130,6 @@ BEGIN
     SelectedFile_LastMoveTo := '';
     SelectedFile_LastRenameFrom := '';
     SelectedFile_LastRenameTo := '';
-    SelectedFile_SnapFileName := '';
   END; { WITH}
 END; { InitialiseSelectedFileVariables }
 
@@ -144,21 +149,12 @@ FUNCTION FileTypeSuffixFoundMainProc(TempFileName : String; OUT FileNameWithoutS
       Result := False;
       SuffixFoundStr := '';
       FileNameWithoutSuffix := TempFileName;
-    END ELSE
-//      IF Pos('.DB', UpperCase(TempFileName)) > 0 THEN BEGIN
-//        { exclude files with .db wherever it appears in a filename }
-//        Result := True;
-//        FileNameWithoutSuffix := Copy(TempFileName, 1, SuffixPos - 1);
-//        TypeOfFile := TempTypeOfFile;
-//        SuffixFoundStr := '';
-//        SuffixPos := 0;
-//      END ELSE
-      BEGIN
-        Result := True;
-        SuffixFoundStr := Str;
-        TypeOfFile := TempTypeOfFile;
-        FileNameWithoutSuffix := Copy(TempFileName, 1, SuffixPos - 1);
-      END;
+    END ELSE BEGIN
+      Result := True;
+      SuffixFoundStr := Str;
+      TypeOfFile := TempTypeOfFile;
+      FileNameWithoutSuffix := Copy(TempFileName, 1, SuffixPos - 1);
+    END;
   END; { GetPos }
 
 BEGIN
@@ -405,14 +401,14 @@ END; { ImageViewUnitFormMouseWheel }
 
 PROCEDURE TImageViewUnitForm.ImageViewUnitFormCreate(Sender: TObject);
 
-  PROCEDURE CheckParameter(Parameter : String; ParameterPos : Integer; DirectoryStr : String);
+  PROCEDURE CheckParameter(Parameter : String; ParameterPos : Integer; OUT Str : String);
   VAR
     StrPos : Integer;
 
   BEGIN
     StrPos := Pos(UpperCase(Parameter), UpperCase(ParamStr(ParameterPos)));
     IF StrPos > 0 THEN
-      DirectoryStr := Copy(ParamStr(ParameterPos), Length(Parameter) + 1)
+      Str := UpperCase(Copy(ParamStr(ParameterPos), Length(Parameter) + 1))
     ELSE BEGIN
       ShowMessage('No ' + Parameter + ' parameter specified in command line "' + CmdLine + '" - press OK to exit');
       Application.Terminate;
@@ -428,14 +424,18 @@ BEGIN
     CheckParameter('/ARCHIVE=', 2, ArchiveDirectory);
     CheckParameter('/MOVE1=', 3, MoveDirectory1);
     CheckParameter('/MOVE2=', 4, MoveDirectory2);
+    CheckParameter('/SORT=', 5, SortStr);
 
     IniFile := TRegistryIniFile.Create('FWPExplorer');
 
     WITH IniFile DO BEGIN
       { Directories }
-      ArchiveDirectory := ReadString(DirectoriesSectionStr, ArchiveDirectoryStr, '');
-      MoveDirectory1 := ReadString(DirectoriesSectionStr, MoveDirectory1Str, '');
-      MoveDirectory2 := ReadString(DirectoriesSectionStr, MoveDirectory2Str, '');
+      IF ArchiveDirectory = '' THEN
+        ArchiveDirectory := ReadString(DirectoriesSectionStr, ArchiveDirectoryStr, '');
+      IF MoveDirectory1 = '' THEN
+        MoveDirectory1 := ReadString(DirectoriesSectionStr, MoveDirectory1Str, '');
+      IF MoveDirectory2 = '' THEN
+        MoveDirectory2 := ReadString(DirectoriesSectionStr, MoveDirectory2Str, '');
     END; {WITH}
   EXCEPT
     ON E : Exception DO
@@ -478,7 +478,7 @@ BEGIN
   ImageViewUnitFileNameEdit.ReadOnly := True;
 END; { ImageViewUnitFileNameEditExit }
 
-FUNCTION GetFileNumberSuffixFromSnapFile(FileName : String; OUT FileNameWithoutNumbers, NumberStr : String) : Boolean; Overload;
+FUNCTION GetFileNumberSuffixFromSnapFile{1}(FileName : String; OUT IsJPEG : Boolean; OUT NumberStr : String) : Boolean; Overload;
 { Return the suffix (if any) found in an associated snap file }
 VAR
   LastDotPos : Integer;
@@ -486,35 +486,38 @@ VAR
   TempInt : Integer;
 
 BEGIN
+  IsJPEG := False;
   Result := False;
 
   IF FindFirst(PathName + 'Snaps\' + FileName + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
     { Find the last dot - if there are numbers after it, then we want to copy them }
     LastDotPos := LastDelimiter('.', SearchRec.Name);
     NumberStr := Copy(SearchRec.Name, LastDotPos + 1);
-    FileNameWithoutNumbers := Copy(SearchRec.Name, 1,  LastDotPos - 1);
-
     IF NOT TryStrToInt(NumberStr, TempInt) THEN
       NumberStr := '';
+
+    IF Pos('.jpg', SearchRec.Name) > 0 THEN
+      IsJPEG := True;
 
     Result := True;
   END;
 END; { GetFileNumberSuffixFromSnapFile-1 }
 
-FUNCTION GetFileNumberSuffixFromSnapFile{1}(FileName : String; OUT NumberStr : String) : Boolean; Overload;
-{ Return the suffix (if any) found in an associated snap file. Do not return the file name minus the nunbers here. }
+FUNCTION GetFileNumberSuffixFromSnapFile{2}(FileName : String; OUT NumberStr : String) : Boolean; Overload;
+{ Return the suffix (if any) found in an associated snap file. This version does't retirn whether we've found a jpeg or not. }
 VAR
-  FileNameWithoutNumbers : String;
+  IsJPEG : Boolean;
 
 BEGIN
-  Result := GetFileNumberSuffixFromSnapFile(FileName, FileNameWithoutNumbers, NumberStr);
+  Result := GetFileNumberSuffixFromSnapFile(FileName, IsJPEG, NumberStr);
 END; { GetFileNumberSuffixFromSnapFile-2 }
 
-FUNCTION SnapsFileNumberRename(FileName, NewNumberStr : String) : Boolean;
-{ Routine for snaps file renaming }
+FUNCTION SnapFileNumberRename(FileName, NewNumberStr : String) : Boolean;
+{ Routine for snap file renaming }
 VAR
   Done : Boolean;
   I : Integer;
+  OK : Boolean;
   OldNumberStr : String;
 
 BEGIN
@@ -527,10 +530,23 @@ BEGIN
       IF NewNumberStr = '0' THEN
         NewNumberStr := '';
 
-      IF NOT RenameFile(PathName + 'Snaps\' + FileName + '.jpg.' + OldNumberStr, PathName + 'Snaps\' + FileName + '.jpg.' + NewNumberStr) THEN
-        ShowMessage('Error ' + IntToStr(GetLastError) + ' in renaming file ''' + PathName + 'Snaps\' + FileName + '.jpg.' + OldNumberStr
-                    + ''' to ''' + PathName + 'Snaps\' + FileName + '.jpg.' + NewNumberStr)
-      ELSE BEGIN
+      OK := False;
+
+      IF FileExists(PathName + 'Snaps\' + FileName + '.txt.' + OldNumberStr) THEN
+        IF RenameFile(PathName + 'Snaps\' + FileName + '.txt.' + OldNumberStr, PathName + 'Snaps\' + FileName + '.txt.' + NewNumberStr) THEN
+          OK := True
+        ELSE
+          ShowMessage('Error ' + IntToStr(GetLastError) + ' in renaming file ''' + PathName + 'Snaps\' + FileName + '.txt.' + OldNumberStr
+                      + ''' to ''' + PathName + 'Snaps\' + FileName + '.txt.' + NewNumberStr);
+
+      IF FileExists(PathName + 'Snaps\' + FileName + '.jpg.' + OldNumberStr) THEN
+        IF RenameFile(PathName + 'Snaps\' + FileName + '.jpg.' + OldNumberStr, PathName + 'Snaps\' + FileName + '.jpg.' + NewNumberStr) THEN
+          OK := True
+        ELSE
+          ShowMessage('Error ' + IntToStr(GetLastError) + ' in renaming file ''' + PathName + 'Snaps\' + FileName + '.jpg.' + OldNumberStr
+                      + ''' to ''' + PathName + 'Snaps\' + FileName + '.jpg.' + NewNumberStr);
+
+      IF OK THEN BEGIN
         Result := True;
 
         WITH ImageViewUnitForm DO BEGIN
@@ -558,88 +574,107 @@ BEGIN
     ON E : Exception DO
       ShowMessage('FileNameRename: ' + E.ClassName +' error raised, with message: ' + E.Message);
   END;
-END; { SnapsFileNumberRename }
+END; { SnapFileNumberRename }
 
-FUNCTION FileRenameProc(NewPathName, NewFileName : String; IncludeSnapFile : Boolean) : Boolean;
+FUNCTION FileRenameProc(NewPathName, NewFileName : String) : Boolean;
 { Main routine for file renaming }
 VAR
   Done : Boolean;
   I : Integer;
+  IsJPEG : Boolean;
+  JpgOrTxtStr : String;
   NumberStr : String;
   OldSnapFileName : String;
-  OldSnapFileNameWithoutNumbers : String;
 
 BEGIN
   Result := False;
 
   TRY
     WITH SelectedFileRec DO BEGIN
-      IF NOT RenameFile(PathName + SelectedFile_Name, NewPathName + NewFileName) THEN
-        ShowMessage('Error ' + IntToStr(GetLastError) + ' in renaming file ''' + PathName + SelectedFile_Name
-                    + ''' to ''' + NewPathName + NewFileName + ''' - ' + SysErrorMessage(GetLastError))
+      IF NOT GetFileNumberSuffixFromSnapFile(SelectedFile_Name, IsJPEG, NumberStr) THEN
+        ShowMessage('No corresponding snap file found for ' + SelectedFile_Name + ' - cannot rename file')
       ELSE BEGIN
-        SelectedFile_LastRenameTo := NewPathName + NewFileName;
-        SelectedFile_LastRenameFrom := PathName + SelectedFile_Name;
+        IF NOT RenameFile(PathName + SelectedFile_Name, NewPathName + NewFileName) THEN
+          ShowMessage('Error ' + IntToStr(GetLastError) + ' in renaming file ''' + PathName + SelectedFile_Name
+                      + ''' to ''' + NewPathName + NewFileName + ''' - ' + SysErrorMessage(GetLastError))
+        ELSE BEGIN
+          SelectedFile_LastRenameTo := NewPathName + NewFileName;
+          SelectedFile_LastRenameFrom := PathName + SelectedFile_Name;
 
-        OldSnapFileName := SelectedFile_Name;
-        SelectedFile_Name := NewFileName;
+          OldSnapFileName := SelectedFile_Name;
+          SelectedFile_Name := NewFileName;
 
-        IF IncludeSnapFile THEN BEGIN
-          { the snap file needs to be renamed }
-          GetFileNumberSuffixFromSnapFile(OldSnapFileName, OldSnapFileNameWithoutNumbers, NumberStr);
-          IF NOT RenameFile(PathName + 'Snaps\' + OldSnapFileName + '.jpg.' + NumberStr, PathName + 'Snaps\' + NewFileName + '.jpg.' + NumberStr) THEN
-            ShowMessage('Error ' + IntToStr(GetLastError) + ' in renaming file ''' + PathName + 'Snaps\' + OldSnapFileName + '.jpg.' + NumberStr
-                        + ''' to ''' + PathName + 'Snaps\' + NewFileName + '.jpg.' + NumberStr);
-        END;
+          { The snap file needs to be renamed too }
+          GetFileNumberSuffixFromSnapFile(OldSnapFileName, IsJPEG, NumberStr);
 
-        { Finally, see if the filename behind the image in the ImageViewUnitForm needs to be renamed too }
-        IF Assigned(ImageViewUnitForm) AND ImageViewUnitForm.Visible THEN BEGIN
-          WITH ImageViewUnitForm DO BEGIN
-            I := 0;
-            Done := False;
-            WHILE (I < ImageViewUnitForm.ControlCount) AND NOT Done DO BEGIN
-              IF Controls[I] IS TImage THEN BEGIN
-                IF TImage(ImageViewUnitForm.Controls[I]).Hint = OldSnapFileName THEN BEGIN
-                  Done := True;
-                  TImage(ImageViewUnitForm.Controls[I]).Hint := NewFileName;
-                END;
-              END;
-              Inc(I);
-            END; {WHILE}
+          IF IsJPEG THEN
+            JpgOrTxtStr := 'jpg'
+          ELSE
+            JpgOrTxtStr := 'txt';
 
-            { and the image's label }
-            I := 0;
-            Done := False;
-            WHILE (I < ImageViewUnitForm.ControlCount) AND NOT Done DO BEGIN
-              IF Controls[I] IS TLabel THEN BEGIN
-                IF TLabel(ImageViewUnitForm.Controls[I]).Caption = OldSnapFileName THEN BEGIN
-                  Done := True;
-                  TLabel(ImageViewUnitForm.Controls[I]).Caption := NewFileName;
-                END ELSE
-                  IF TLabel(ImageViewUnitForm.Controls[I]).Caption = OldSnapFileName + '.' + NumberStr THEN BEGIN
+          IF NumberStr = '' THEN BEGIN
+            IF NOT RenameFile(PathName + 'Snaps\' + OldSnapFileName + '.' + JpgORTxtStr,
+                              NewPathName + 'Snaps\' + NewFileName  + '.' + JpgORTxtStr)
+            THEN
+              ShowMessage('Error ' + IntToStr(GetLastError) + ' in renaming file ''' + PathName + 'Snaps\' + OldSnapFileName + '.' + JpgORTxtStr
+                          + ''' to ''' + NewPathName + 'Snaps\' + NewFileName  + '.' + JpgORTxtStr);
+          END ELSE BEGIN
+            IF NOT RenameFile(PathName + 'Snaps\' + OldSnapFileName + '.' + JpgORTxtStr + '.' + NumberStr,
+                              NewPathName + 'Snaps\' + NewFileName  + '.' + JpgORTxtStr + '.' + NumberStr)
+            THEN
+              ShowMessage('Error ' + IntToStr(GetLastError) + ' in renaming file ''' + PathName + 'Snaps\' + OldSnapFileName + '.' + JpgORTxtStr + '.' + NumberStr
+                          + ''' to ''' + NewPathName + 'Snaps\' + NewFileName  + '.' + JpgORTxtStr + '.' + NumberStr);
+          END;
+
+          { Finally, see if the filename behind the image in the ImageViewUnitForm needs to be renamed too }
+          IF Assigned(ImageViewUnitForm) AND ImageViewUnitForm.Visible THEN BEGIN
+            WITH ImageViewUnitForm DO BEGIN
+              I := 0;
+              Done := False;
+              WHILE (I < ImageViewUnitForm.ControlCount) AND NOT Done DO BEGIN
+                IF Controls[I] IS TImage THEN BEGIN
+                  IF TImage(ImageViewUnitForm.Controls[I]).Hint = OldSnapFileName THEN BEGIN
                     Done := True;
-                    TLabel(ImageViewUnitForm.Controls[I]).Caption := NewFileName + '.' + NumberStr;
+                    TImage(ImageViewUnitForm.Controls[I]).Hint := NewFileName;
                   END;
-              END;
-              Inc(I);
-            END; {WHILE}
-
-            { and also the image's focus rectangle }
-            I := 0;
-            Done := False;
-            WHILE (I < ImageViewUnitForm.ControlCount) AND NOT Done DO BEGIN
-              IF Controls[I] IS TShape THEN BEGIN
-                IF TShape(ImageViewUnitForm.Controls[I]).Hint = OldSnapFileName THEN BEGIN
-                  Done := True;
-                  TShape(ImageViewUnitForm.Controls[I]).Hint := NewFileName;
                 END;
-              END;
-              Inc(I);
-            END; {WHILE}
-          END; {WITH}
-        END;
+                Inc(I);
+              END; {WHILE}
 
-        Result := True;
+              { and the image's label }
+              I := 0;
+              Done := False;
+              WHILE (I < ImageViewUnitForm.ControlCount) AND NOT Done DO BEGIN
+                IF Controls[I] IS TLabel THEN BEGIN
+                  IF TLabel(ImageViewUnitForm.Controls[I]).Caption = OldSnapFileName THEN BEGIN
+                    Done := True;
+                    TLabel(ImageViewUnitForm.Controls[I]).Caption := NewFileName;
+                  END ELSE
+                    IF TLabel(ImageViewUnitForm.Controls[I]).Caption = OldSnapFileName + '.' + NumberStr THEN BEGIN
+                      Done := True;
+                      TLabel(ImageViewUnitForm.Controls[I]).Caption := NewFileName + '.' + NumberStr;
+                    END;
+                END;
+                Inc(I);
+              END; {WHILE}
+
+              { and also the image's focus rectangle }
+              I := 0;
+              Done := False;
+              WHILE (I < ImageViewUnitForm.ControlCount) AND NOT Done DO BEGIN
+                IF Controls[I] IS TShape THEN BEGIN
+                  IF TShape(ImageViewUnitForm.Controls[I]).Hint = OldSnapFileName THEN BEGIN
+                    Done := True;
+                    TShape(ImageViewUnitForm.Controls[I]).Hint := NewFileName;
+                  END;
+                END;
+                Inc(I);
+              END; {WHILE}
+            END; {WITH}
+          END;
+
+          Result := True;
+        END;
       END;
     END; {WITH}
   EXCEPT
@@ -656,7 +691,7 @@ BEGIN
         IF ImageViewUnitFileNameEdit.Text = SelectedFile_Name THEN
           ShowMessage('File name is the same')
         ELSE
-          FileRenameProc(PathName, ImageViewUnitFileNameEdit.Text, AndSnapFile);
+          FileRenameProc(PathName, ImageViewUnitFileNameEdit.Text);
       END;
 
       IF (Key = vk_Escape) OR (Key = vk_Return) THEN BEGIN
@@ -702,14 +737,14 @@ BEGIN
         ELSE BEGIN
           IF ImageViewUnitFileNameNumbersEdit.Text = '0' THEN
             { remove the numbers }
-            SnapsFileNumberRename(SelectedFile_Name, '')
+            SnapFileNumberRename(SelectedFile_Name, '')
           ELSE BEGIN
             GetFileNumberSuffixFromSnapFile(SelectedFile_Name, OldNumberStr);
             IF PathName + 'Snaps\' + SelectedFile_Name + '.jpg.' + OldNumberStr = PathName + 'Snaps\' + SelectedFile_Name + '.jpg.' + ImageViewUnitFileNameNumbersEdit.Text
             THEN
               ShowMessage('File name is the same')
             ELSE
-              SnapsFileNumberRename(SelectedFile_Name, ImageViewUnitFileNameNumbersEdit.Text);
+              SnapFileNumberRename(SelectedFile_Name, ImageViewUnitFileNameNumbersEdit.Text);
           END;
         END;
       END;
@@ -1468,8 +1503,8 @@ BEGIN
         Result := CompareNewAlphaNumericStr(FileName1, FileName2);
       SortByDate:
         BEGIN
-          DateTime1 := StrToDate(List.Values[List.Names[Index1]]);
-          DateTime2 := StrToDate(List.Values[List.Names[Index2]]);
+          DateTime1 := StrToDateTime(List.Values[List.Names[Index1]]);
+          DateTime2 := StrToDateTime(List.Values[List.Names[Index2]]);
           Result := -CompareDates(DateTime1, DateTime2);
         END;
       SortByLastAccess:
@@ -1500,12 +1535,13 @@ CONST
   ImageWidth = 225;
 
 VAR
+  Bitmap : TBitMap;
   DirStrPos : Integer;
 //  ElapsedTimeInSeconds : Integer;
-  FocusRectangle : TShape;
 //  HH : Integer;
   Image : TImage;
   ImageCount : Integer;
+  ImageFocusRectangle : TShape;
   ImageLabel : TLabel;
 //  MM : Integer;
   NumberStr : String;
@@ -1523,11 +1559,10 @@ BEGIN
     IF DirStrPos = 0 THEN
       ShowMessage('No directory specified - press any key to exit')
     ELSE BEGIN
-      PathName := Copy(ParamStr(1), Length('/DIR=') + 1);
       EligibleFiles := 0;
 
-      { and to be consistent with ListViewPathName in FWPExplorer, PathName is followed by a backslash }
-      PathName := PathName + '\';
+      IF PathName[Length(PathName)] <> '\' THEN
+        PathName := PathName + '\';
 
       { First count how many potential images there are }
       TotalFileCount := 0;
@@ -1541,8 +1576,11 @@ BEGIN
             IF FileTypeSuffixFound(SearchRec.Name) THEN BEGIN
               IF FileTypeSuffixFound(SearchRec.Name, TypeOfFile)
               AND (TypeOfFile = VideoFile)
-              AND (FileSearch(SearchRec.Name + '.jpg', PathName + 'Snaps') = '')
+              AND GetFileNumberSuffixFromSnapFile(SearchRec.Name, NumberStr)
               AND (Pos('.lnk', SearchRec.Name) = 0)
+              AND (Pos('.s', SearchRec.Name) = 0)
+              AND (Pos('.d', SearchRec.Name) = 0)
+              AND (Pos('.db', SearchRec.Name) = 0)
               THEN
                 Inc(EligibleFiles);
             END;
@@ -1553,8 +1591,8 @@ BEGIN
       ImageViewUnitForm.Width := Screen.WorkAreaWidth;
 
       ImageCount := 0;
-      ImageViewUnitForm.ImageViewUnitStopButton.Caption := 'Cancel Loading';
-      ImageViewUnitForm.ImageViewUnitStopButton.Visible := True;
+//      ImageViewUnitForm.ImageViewUnitStopButton.Caption := 'Cancel Loading';
+//      ImageViewUnitForm.ImageViewUnitStopButton.Visible := True;
       Abort := False;
 
       IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) AND NOT Abort THEN BEGIN
@@ -1569,16 +1607,12 @@ BEGIN
               IF (Copy(TempFileName, Length(TempFileName) - 1) <> '.d')
               AND (Copy(TempFileName, Length(TempFileName) - 1) <> '.s')
               AND (Copy(TempFileName, Length(TempFileName) - 2) <> '.db')
-              AND FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr)
+              AND ((FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr))
+                  OR (FileExists(PathName + 'snaps\' + TempFileName + '.txt.' + NumberStr)))
               THEN BEGIN
-                ImageViewUnitForm.Caption := 'Image View: ' + IntToStr(ImageCount) + '/' + IntToStr(TotalFileCount) + ' processed';
-
-                { Process messages to allow ExplorerForm.Caption to continue to change a long creation }
                 Application.ProcessMessages;
 
                 Image := TImage.Create(NIL);
-
-                LoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image);
 
                 Image.Parent := AParent;
                 Image.Center := True;
@@ -1590,15 +1624,31 @@ BEGIN
 
                 Image.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
 
+                IF (FileExists(PathName + 'snaps\' + TempFileName + '.jpg'))
+                OR (FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr))
+                THEN
+                  LoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image)
+                ELSE begin
+                  Bitmap := TBitmap.Create;
+                  Bitmap.Width:= 100;
+                  Bitmap.Height:= 100;
+                  Bitmap.Transparent:= True;
+                  Bitmap.TransparentColor:= clWhite;
+                  Bitmap.Canvas.Brush.Style:= bsSolid;
+                  Bitmap.Canvas.Brush.Color:= clSilver;
+                  Bitmap.Canvas.FillRect(Bitmap.Canvas.ClipRect);
+                  Image.Picture.Bitmap := Bitmap;
+                END;
+
                 { we use Hint as images don't, surprisingly, have captions }
                 Image.Hint := TempFileName;
-                Image.Tag := ImageCount;
+//                Image.Tag := ImageCount;
 
                 { Now add the label }
                 ImageLabel := TLabel.Create(NIL);
                 ImageLabel.Parent := AParent;
                 ImageLabel.Left := Image.Left;
-                ImageLabel.Top := Image.Top + Image.Height;
+                ImageLabel.Top := Image.Top + ImageHeight;
                 ImageLabel.Visible := True;
                 ImageLabel.Enabled := True;
                 ImageLabel.Font.Color := clWindowText;
@@ -1651,30 +1701,36 @@ BEGIN
                 { And prepare a border around the image so we can see which one we've selected. We're using a TShape control rather than FrameRect as it's a control and is
                   permanent.
                 }
-                FocusRectangle := TShape.Create(NIL);
-                FocusRectangle.Parent := AParent;
-                FocusRectangle.Pen.Color := clAqua;
-                FocusRectangle.Pen.Width := 5;
-                FocusRectangle.Shape := stRectangle;
-                FocusRectangle.Brush.Style := bsClear;
+                ImageFocusRectangle := TShape.Create(NIL);
+                WITH ImageFocusRectangle DO BEGIN
+                  Parent := AParent;
+                  Pen.Color := clAqua;
+                  Pen.Width := 5;
+                  Visible := False;
+                  Shape := stRectangle;
+                  Brush.Style := bsClear;
 
-                FocusRectangle.Left := Image.Left - 5;
-                FocusRectangle.Top := Image.Top - 5;
-                FocusRectangle.Width := Image.Width + 10;
-                FocusRectangle.Height := Image.Height + 25;
+                  Left := Image.Left - 5;
+                  Top := Image.Top - 5;
+                  Width := Image.Width + 10;
+                  Height := Image.Height + 25;
 
-                FocusRectangle.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
-                FocusRectangle.Hint := TempFileName;
-                FocusRectangle.Visible := False;
+                  OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+                  Hint := TempFileName;
+                END; {WITH}
               END;
 
               Inc(ImageCount);
+              IF ImageCount = EligibleFiles THEN
+                WriteSplashLoadingLabel(IntToStr(EligibleFiles) + ' Files Loaded')
+              ELSE
+                WriteSplashLoadingLabel(IntToStr(ImageCount) + ' / ' + IntToStr(EligibleFiles) + ' Loaded');
             END;
           END;
+
+          Application.ProcessMessages;
         UNTIL FindNext(SearchRec) <> 0;
       END;
-
-      ImageViewUnitForm.ImageViewUnitStopButton.Visible := False;
 
       IF Abort THEN BEGIN
         ImageViewUnitForm.Visible := False;
@@ -1712,14 +1768,14 @@ VAR
   Done : Boolean;
   FileList : TStringList;
   FileListCount : Integer;
-  I : Integer;
+  FileTypeSuffix : String;
   ImageViewCount : Integer;
   ImageLeft : Integer;
   ImageTop : Integer;
+  LastDotPos : Integer;
   LeftMargin : Integer;
   NumberOfImagesPerRow : Integer;
   SearchRec : TSearchRec;
-  SHFileInfo : TSHFileInfo;
 
 BEGIN
   TRY
@@ -1743,9 +1799,6 @@ BEGIN
             IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) THEN
               Continue
             ELSE BEGIN
-//        IF (Copy(SearchRec.Name, Length(SearchRec.Name) - 1) = '.d') THEN
-//          Continue
-//        ELSE BEGIN
               FormatSettings.ShortDateFormat := 'dd/mm/yyyy';
               FormatSettings.LongTimeFormat := 'hh:mm';
               CASE SortType OF
@@ -1757,18 +1810,12 @@ BEGIN
                   FileList.Add(SearchRec.Name + '=' + DateTimeTostr(FileTimeToDateTime(SearchRec.FindData.ftLastAccessTime)));
                 SortByType:
                   BEGIN
-                    { Get file type and icon for selected file/directory }
-                    ShGetFileInfo(PChar(PathName + SearchRec.Name),
-                                  0,
-                                  SHFileInfo,
-                                  SizeOf(SHFileInfo),
-                                  SHGFI_TYPENAME OR SHGFI_ICON OR SHGFI_SMALLICON);
-
-                    FileList.Add(SearchRec.Name + '=' + shFileInfo.szTypeName);
+                    LastDotPos := LastDelimiter('.', SearchRec.Name);
+                    FileTypeSuffix := Copy(SearchRec.Name, LastDotPos + 1);
+                    FileList.Add(SearchRec.Name + '=' + FileTypeSuffix);
                   END;
               END; {CASE}
             END;
-//      END;
           UNTIL FindNext(SearchRec) <> 0;
         FINALLY
           FindClose(SearchRec);
@@ -1987,16 +2034,18 @@ VAR
             IF FindFirst(PathName + SelectedFile_Name + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
               IF SysUtils.GetDiskFreeSpaceEx(PChar(ArchiveDirectory), FreeAvailable, TotalSpace, NIL) THEN BEGIN
                 FileSize := Int64(SearchRec.FindData.nFileSizeHigh) SHL Int64(32) + Int64(SearchRec.FindData.nFileSizeLow);
-                IF FileSize > FreeAvailable THEN BEGIN
+
+                { Leave a margin, to stop the annoying "your disc is nearly full" system popups }
+                IF FileSize + 100000 > FreeAvailable THEN BEGIN
                   { we can't save it there - best mark it as to-be-archived instead }
                   CanArchive := False;
-                  FileRenameProc(PathName, SelectedFile_Name + 's', AndSnapFile);
+                  FileRenameProc(PathName, SelectedFile_Name + '.s');
                 END;
               END;
             END;
 
             IF CanArchive THEN BEGIN
-              IF NOT FileRenameProc(TempDirectory + '\', SelectedFile_Name, AndSnapFile) THEN
+              IF NOT FileRenameProc(TempDirectory + '\', SelectedFile_Name) THEN
                 ShowMessage('Could not move "' + PathName + SelectedFile_Name + '"'
                             + ' to "' + TempDirectory + '\' + SelectedFile_Name + '" - ' + SysErrorMessage(GetLastError))
               ELSE BEGIN
@@ -2073,7 +2122,7 @@ BEGIN
               IF NOT (ssShift IN ShiftState) THEN BEGIN
                 { Rename the files adding a "d" for future deletion by hand }
                 TempSelectedFileName := SelectedFile_Name;
-                FileRenameProc(PathName, SelectedFile_Name + '.d', NOT AndSnapFile);
+                FileRenameProc(PathName, SelectedFile_Name + '.d');
                 ClearImageData(TempSelectedFileName + '.d');
                 PositionImages(TWinControl(Sender), LastSort, CaptionStr, Reposition);
               END ELSE BEGIN
@@ -2120,7 +2169,8 @@ BEGIN
 
               WITH VertScrollBar DO
                 Position := 0;
-              PositionImages(TWinControl(Sender), SortByDate, CaptionStr, Reposition);
+              ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By Date - please wait';
+              PositionImages(TWinControl(Sender), SortByDate, CaptionStr, NOT Reposition);
               ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
 
               Screen.Cursor := SaveCursor;
@@ -2138,7 +2188,8 @@ BEGIN
                 { reorder the listview by filename }
                 WITH VertScrollBar DO
                   Position := 0;
-                PositionImages(TWinControl(Sender), SortByFileName, CaptionStr, Reposition);
+                ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By File Name - please wait';
+                PositionImages(TWinControl(Sender), SortByFileName, CaptionStr, NOT Reposition);
                 ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
               END;
 
@@ -2147,9 +2198,9 @@ BEGIN
 
           Ord('G'):
             IF Copy(SelectedFile_Name, 1, 3) = 'st-' THEN
-              FileRenameProc(PathName, Copy(SelectedFile_Name, 4), AndSnapFile)
+              FileRenameProc(PathName, Copy(SelectedFile_Name, 4))
             ELSE
-              FileRenameProc(PathName, 'st-' + SelectedFile_Name, AndSnapFile);
+              FileRenameProc(PathName, 'st-' + SelectedFile_Name);
 
           Ord('L'):
             { reorder the listview by last access time }
@@ -2159,7 +2210,8 @@ BEGIN
 
               WITH VertScrollBar DO
                 Position := 0;
-              PositionImages(TWinControl(Sender), SortByLastAccess, CaptionStr, Reposition);
+              ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By Last Access Time Name - please wait';
+              PositionImages(TWinControl(Sender), SortByLastAccess, CaptionStr, NOT Reposition);
               ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
 
               Screen.Cursor := SaveCursor;
@@ -2181,30 +2233,32 @@ BEGIN
 
           Ord('O'):
             IF Copy(SelectedFile_Name, 1, 3) = 'so-' THEN
-              FileRenameProc(Pathname, Copy(SelectedFile_Name, 4), AndSnapFile)
+              FileRenameProc(Pathname, Copy(SelectedFile_Name, 4))
             ELSE
-              FileRenameProc(PathName, 'so-' + SelectedFile_Name, AndSnapFile);
+              FileRenameProc(PathName, 'so-' + SelectedFile_Name);
 
           Ord('P'):
             IF Copy(SelectedFile_Name, 1, 3) = 'sp-' THEN
-              FileRenameProc(PathName, Copy(SelectedFile_Name, 4), AndSnapFile)
+              FileRenameProc(PathName, Copy(SelectedFile_Name, 4))
             ELSE
-              FileRenameProc(PathName, 'sp-' + SelectedFile_Name, AndSnapFile);
+              FileRenameProc(PathName, 'sp-' + SelectedFile_Name);
 
           Ord('T'):
             { reorder the listview by file type }
             BEGIN
               WITH VertScrollBar DO
                 Position := 0;
-              PositionImages(TWinControl(Sender), SortByType, CaptionStr, Reposition);
+
+              ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By File Type - please wait';
+              PositionImages(TWinControl(Sender), SortByType, CaptionStr, NOT Reposition);
               ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
             END;
 
           Ord('V'):
             IF Copy(SelectedFile_Name, 1, 2) = 'v-' THEN
-              FileRenameProc(PathName, Copy(SelectedFile_Name, 3), AndSnapFile)
+              FileRenameProc(PathName, Copy(SelectedFile_Name, 3))
             ELSE
-              FileRenameProc(PathName, 'v-' + SelectedFile_Name, AndSnapFile);
+              FileRenameProc(PathName, 'v-' + SelectedFile_Name);
 
           vk_F3 :
             BEGIN
@@ -2251,8 +2305,23 @@ VAR
 
 BEGIN
   TRY
-    IF NOT Initialised THEN
-      PositionImages(Self, SortByFileName, CaptionStr, NOT Reposition);
+    IF NOT Initialised THEN BEGIN
+      IF (SortStr = 'FILENAMESORT') OR (SortStr = 'SIZESORT') THEN
+        { size sort makes no sense for image view }
+        PositionImages(Self, SortByFileName, CaptionStr, NOT Reposition)
+      ELSE
+        IF SortStr = 'DATESORT' THEN
+          PositionImages(Self, SortByDate, CaptionStr, NOT Reposition)
+        ELSE
+          IF SortStr = 'LASTACCESSSORT' THEN
+            PositionImages(Self, SortByLastAccess, CaptionStr, NOT Reposition)
+          ELSE
+            IF SortStr = 'TYPESORT' THEN
+              PositionImages(Self, SortByType, CaptionStr, NOT Reposition);
+
+      IF IsSplashFormVisible THEN
+        HideSplashForm;
+    END;
   EXCEPT
     ON E : Exception DO
       ShowMessage('ImageViewShow: ' + E.ClassName +' error raised, with message: ' + E.Message);

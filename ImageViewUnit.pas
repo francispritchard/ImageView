@@ -30,6 +30,7 @@ TYPE
     PROCEDURE ImageViewUnitStopButtonClick(Sender: TObject);
   PRIVATE
     { Private declarations }
+    PROCEDURE WMVScroll(VAR Msg :TMessage); MESSAGE WM_VSCROLL;
   PUBLIC
     { Public declarations }
     PROCEDURE AppDeactivate(Sender : TObject);
@@ -67,6 +68,9 @@ PROCEDURE CloseOutputFile(VAR OutputFile : Text; Filename : String); External 'L
 FUNCTION SnapFileNumberRename(FileName, NewNumberStr : String) : Boolean;
 { Routine for snap file renaming }
 
+PROCEDURE StopFileLoading;
+{ Allows the splash screen to interrupt the loading process }
+
 FUNCTION OpenOutputFileOK(VAR OutputFilename : Text; Filename : String; OUT ErrorMsg : String; AppendToFile : Boolean) : Boolean; External 'ListFilesDLLProject.dll';
 { Open (and create if necessary) a file }
 
@@ -75,7 +79,7 @@ IMPLEMENTATION
 {$R *.dfm}
 {$WARN SYMBOL_PLATFORM OFF }
 
-USES System.UItypes, ZoomPlayerUnit, ShellAPI, StrUtils, Registry, ImageViewSplash;
+USES System.UItypes, ZoomPlayerUnit, ShellAPI, StrUtils, Registry, ImageViewSplash, System.Types;
 
 FUNCTION IsProgramRunning(ProgramName : String) : Boolean; External 'ListFilesDLLProject.dll'
 { Checks to see if a given program is running }
@@ -93,7 +97,6 @@ CONST
   Reposition = True;
 
 VAR
-  Abort : Boolean = False;
   ArchiveDirectory : String = '';
   CustomSortType : TypeOfSort;
   Editing : Boolean = False;
@@ -110,6 +113,7 @@ VAR
   SaveVertSCrollBarRange : Integer = 2000;
   SortOrder : SortOrderType;
   SortStr : String = '';
+  StopLoading : Boolean = False;
   TestCount : Integer = 0;
   TotalFileCount : Integer = 0;
   VLC : Boolean = False;
@@ -389,6 +393,164 @@ BEGIN
   END;
 END; { OpenImageViewUnitEditPanel }
 
+FUNCTION GetFileNumberSuffixFromSnapFile{1}(FileName : String; OUT IsJPEG : Boolean; OUT NumberStr : String) : Boolean; Overload;
+{ Return the suffix (if any) found in an associated snap file }
+VAR
+  LastDotPos : Integer;
+  SearchRec : TSearchRec;
+  TempInt : Integer;
+
+BEGIN
+  IsJPEG := False;
+  Result := False;
+
+  IF FindFirst(PathName + 'Snaps\' + FileName + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
+    { Find the last dot - if there are numbers after it, then we want to copy them }
+    LastDotPos := LastDelimiter('.', SearchRec.Name);
+    NumberStr := Copy(SearchRec.Name, LastDotPos + 1);
+    IF NOT TryStrToInt(NumberStr, TempInt) THEN
+      NumberStr := '';
+
+    IF Pos('.jpg', SearchRec.Name) > 0 THEN
+      IsJPEG := True;
+
+    Result := True;
+  END;
+END; { GetFileNumberSuffixFromSnapFile-1 }
+
+FUNCTION GetFileNumberSuffixFromSnapFile{2}(FileName : String; OUT NumberStr : String) : Boolean; Overload;
+{ Return the suffix (if any) found in an associated snap file. This version does't retirn whether we've found a jpeg or not. }
+VAR
+  IsJPEG : Boolean;
+
+BEGIN
+  Result := GetFileNumberSuffixFromSnapFile(FileName, IsJPEG, NumberStr);
+END; { GetFileNumberSuffixFromSnapFile-2 }
+
+PROCEDURE LoadAndConvertImage(TempFileName : String; OUT Image : TImage);
+VAR
+  FileStream : TFileStream;
+  OleGraphic : TOleGraphic;
+
+BEGIN
+  TRY
+    TRY
+      OleGraphic := TOleGraphic.Create;
+      FileStream := TFileStream.Create(TempFileName, fmOpenRead or fmSharedenyNone);
+      OleGraphic.LoadFromStream(FileStream);
+      Image.Picture.Assign(OleGraphic);
+    FINALLY
+      FileStream.Free;
+      OleGraphic.Free
+    END; {TRY}
+  EXCEPT
+    ON E : Exception DO
+      ShowMessage('LoadAndConvertImage: ' + E.ClassName +' error raised, with message: ' + E.Message);
+  END; {TRY}
+END; { LoadAndConvertImage }
+
+PROCEDURE oldLoadAndConvertImage(TempFileName : String; OUT Image : TImage);
+VAR
+  Bitmap, NewBitmap : TBitmap;
+  FileStream : TFileStream;
+  OleGraphic : TOleGraphic;
+  Source : TImage;
+  TempDouble : Double;
+  UseOriginalImage : Boolean;
+
+BEGIN
+  TRY
+    FileStream := TFileStream.Create(TempFileName, {fmOpenRead Or} fmSharedenyNone);
+    IF FileStream <> NIL THEN BEGIN
+      OleGraphic := TOleGraphic.Create;
+
+      TRY
+        OleGraphic.LoadFromStream(FileStream);
+      EXCEPT
+        ON E : Exception DO
+          { do nothing }; //ShowMessage('OleGraphic.LoadFromStream: ' + E.ClassName +' error raised with message: ' + E.Message);
+      END;
+
+      Source := TImage.Create(NIL);
+      Source.Picture.Assign(OleGraphic);
+
+      Bitmap := TBitmap.Create; { Converting to bitmap }
+      Bitmap.Width := Source.Picture.Width;
+      Bitmap.Height := Source.Picture.Height;
+      Bitmap.Canvas.Draw(0, 0, Source.Picture.Graphic);
+      Bitmap.Modified := True;
+
+      NewBitMap := TBitmap.Create; { Converting to bitmap }
+
+      UseOriginalImage := False;
+      IF BitMap.Width = 0 THEN
+        Image.Picture.Bitmap := Bitmap
+      ELSE BEGIN
+        TempDouble := Image.Width / Bitmap.Width;
+        TRY
+          ScaleImage(Bitmap, NewBitMap, TempDouble);
+        EXCEPT
+          ON E : Exception DO BEGIN
+            { do nothing } ; // ShowMessage('ScaleImage: ' + E.ClassName +' error raised with message: ' + E.Message);
+            UseOriginalImage := True;
+          END;
+        END; {TRY}
+      END;
+
+      IF UseOriginalImage THEN
+        Image.Picture.Bitmap := Bitmap
+      ELSE
+        Image.Picture.Bitmap := NewBitmap;
+
+      FileStream.Free;
+      OleGraphic.Free;
+      Source.Free;
+      Bitmap.Free;
+      NewBitmap.Free;
+    END;
+  EXCEPT
+    ON E : Exception DO
+      ShowMessage('LoadAndConvertImage: ' + E.ClassName +' error raised, with message: ' + E.Message);
+  END;
+END; { oldLoadAndConvertImage }
+
+PROCEDURE CheckImagesInView;
+{ Do any images neeed to be added? }
+VAR
+  I : Integer;
+  IsJPEG : Boolean;
+  Done : Boolean;
+  Image : TImage;
+  NumberStr : String;
+
+BEGIN
+  WITH ImageViewUnitForm DO BEGIN
+    I := 0;
+    WHILE (I < ImageViewUnitForm.ControlCount) DO BEGIN
+      IF Controls[I] IS TImage THEN BEGIN
+        WITH TImage(ImageViewUnitForm.Controls[I]) DO BEGIN
+          IF NOT Visible THEN BEGIN
+            IF PtInRect(Screen.WorkAreaRect, Point(Left, Top))
+            OR PtInRect(Screen.WorkAreaRect, Point(Left + Width, Top + Height))
+            THEN BEGIN
+              IF GetFileNumberSuffixFromSnapFile(Hint, IsJPEG, NumberStr) THEN BEGIN
+                IF IsJPEG THEN BEGIN
+                  IF NumberStr = '' THEN
+                    LoadAndConvertImage(PathName + 'Snaps\' + Hint + '.jpg', Image)
+                  ELSE;
+                    LoadAndConvertImage(PathName + 'Snaps\' + Hint + '.jpg.' + NumberStr, Image);
+                END;
+                Visible := True;
+              END;
+            END;
+          END;
+        END; {WITH}
+      END;
+      Inc(I);
+    END; {WHILE}
+  END; {WITH}
+END; { CheckImagesInView }
+
 PROCEDURE TImageViewUnitForm.ImageViewUnitFormMouseWheel(Sender : TObject; Shift : TShiftState; WheelDelta : Integer; MousePos : TPoint; VAR Handled : Boolean);
 BEGIN
   WITH VertScrollBar DO BEGIN
@@ -397,6 +559,27 @@ BEGIN
     ELSE
       Position := Position + (Increment * 2)
   END; {WITH}
+
+  CheckImagesInView;
+
+//  I := 0;
+//  WHILE (I < ImageViewUnitForm.ControlCount) DO BEGIN
+//    IF Controls[I] IS TImage THEN BEGIN
+//      WITH TImage(ImageViewUnitForm.Controls[I]) DO BEGIN
+//        IF Hint = 'simpsons test file 10.wmv' THEN BEGIN
+//          ImageViewUnitForm.Caption := Hint
+//                                       + ' Top=' + IntToStr(Top)
+//                                       + ' Left=' + IntToStr(Left);
+//
+//          IF PtInRect(Screen.WorkAreaRect, point(left, Top))
+//          OR PtInRect(Screen.WorkAreaRect, point(left + width, Top + height))
+//          THEN
+//            ImageViewUnitForm.Caption := ImageViewUnitForm.Caption + ' on screen';
+//        END;
+//      END; {WITH}
+//    END;
+//    Inc(I);
+//  END; {WHILE}
 END; { ImageViewUnitFormMouseWheel }
 
 PROCEDURE TImageViewUnitForm.ImageViewUnitFormCreate(Sender: TObject);
@@ -477,40 +660,6 @@ BEGIN
   { this is added to get rid of the annoying beep }
   ImageViewUnitFileNameEdit.ReadOnly := True;
 END; { ImageViewUnitFileNameEditExit }
-
-FUNCTION GetFileNumberSuffixFromSnapFile{1}(FileName : String; OUT IsJPEG : Boolean; OUT NumberStr : String) : Boolean; Overload;
-{ Return the suffix (if any) found in an associated snap file }
-VAR
-  LastDotPos : Integer;
-  SearchRec : TSearchRec;
-  TempInt : Integer;
-
-BEGIN
-  IsJPEG := False;
-  Result := False;
-
-  IF FindFirst(PathName + 'Snaps\' + FileName + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
-    { Find the last dot - if there are numbers after it, then we want to copy them }
-    LastDotPos := LastDelimiter('.', SearchRec.Name);
-    NumberStr := Copy(SearchRec.Name, LastDotPos + 1);
-    IF NOT TryStrToInt(NumberStr, TempInt) THEN
-      NumberStr := '';
-
-    IF Pos('.jpg', SearchRec.Name) > 0 THEN
-      IsJPEG := True;
-
-    Result := True;
-  END;
-END; { GetFileNumberSuffixFromSnapFile-1 }
-
-FUNCTION GetFileNumberSuffixFromSnapFile{2}(FileName : String; OUT NumberStr : String) : Boolean; Overload;
-{ Return the suffix (if any) found in an associated snap file. This version does't retirn whether we've found a jpeg or not. }
-VAR
-  IsJPEG : Boolean;
-
-BEGIN
-  Result := GetFileNumberSuffixFromSnapFile(FileName, IsJPEG, NumberStr);
-END; { GetFileNumberSuffixFromSnapFile-2 }
 
 FUNCTION SnapFileNumberRename(FileName, NewNumberStr : String) : Boolean;
 { Routine for snap file renaming }
@@ -853,70 +1002,6 @@ BEGIN
       ShowMessage('ImageViewUnitFormClick: ' + E.ClassName +' error raised, with message: ' + E.Message);
   END;
 END; { ImageViewUnitFormClick }
-
-PROCEDURE LoadAndConvertImage(TempFileName : String; OUT Image : TImage);
-VAR
-  Bitmap, NewBitmap : TBitmap;
-  FileStream : TFileStream;
-  OleGraphic : TOleGraphic;
-  Source : TImage;
-  TempDouble : Double;
-  UseOriginalImage : Boolean;
-
-BEGIN
-  TRY
-    FileStream := TFileStream.Create(TempFileName, {fmOpenRead Or} fmSharedenyNone);
-    IF FileStream <> NIL THEN BEGIN
-      OleGraphic := TOleGraphic.Create;
-
-      TRY
-        OleGraphic.LoadFromStream(FileStream);
-      EXCEPT
-        ON E : Exception DO
-          { do nothing }; //ShowMessage('OleGraphic.LoadFromStream: ' + E.ClassName +' error raised with message: ' + E.Message);
-      END;
-
-      Source := TImage.Create(NIL);
-      Source.Picture.Assign(OleGraphic);
-
-      Bitmap := TBitmap.Create; { Converting to bitmap }
-      Bitmap.Width := Source.Picture.Width;
-      Bitmap.Height := Source.Picture.Height;
-      Bitmap.Canvas.Draw(0, 0, Source.Picture.Graphic);
-
-      NewBitMap := TBitmap.Create; { Converting to bitmap }
-
-      UseOriginalImage := False;
-      IF BitMap.Width = 0 THEN
-        Image.Picture.Bitmap := Bitmap
-      ELSE BEGIN
-        TempDouble := Image.Width / Bitmap.Width;
-        TRY
-          ScaleImage(Bitmap, NewBitMap, TempDouble);
-        EXCEPT
-          ON E : Exception DO BEGIN
-            { do nothing } ; // ShowMessage('ScaleImage: ' + E.ClassName +' error raised with message: ' + E.Message);
-            UseOriginalImage := True;
-          END;
-        END;
-      END;
-
-      IF UseOriginalImage THEN
-        Image.Picture.Bitmap := Bitmap
-      ELSE
-        Image.Picture.Bitmap := NewBitmap;
-
-      FileStream.Free;
-      OleGraphic.Free;
-      Source.Free;
-      Bitmap.Free;
-      NewBitmap.Free;
-    END;
-  EXCEPT
-    ON E : Exception DO
-      ShowMessage('LoadAndConvertImage: ' + E.ClassName +' error raised, with message: ' + E.Message);
-  END;
-END; { LoadAndConvertImage }
 
 FUNCTION IsDirectory(Attr : Integer) : Boolean;
 { Return whether a given attribute indicates a directory }
@@ -1276,7 +1361,7 @@ BEGIN
               Screen.Cursor := SaveCursor;
 
               TempImage := FindSpecificImageOnImageViewUnitForm(SelectedFile_Name);
-              LoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage);
+              oldLoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage); { +++ }
             END ELSE
               IF ssCtrl IN ShiftState THEN BEGIN
                 { we need a replacement image - this takes some time so show the hourglass }
@@ -1291,7 +1376,7 @@ BEGIN
                 Screen.Cursor := SaveCursor;
 
                 TempImage := FindSpecificImageOnImageViewUnitForm(SelectedFile_Name);
-                LoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage);
+                oldLoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage); { +++ }
               END ELSE BEGIN
                 TurnSelectedFileRecRectangleVisibilityOn(SelectedFile_Name);
                 PrepareFiles(PathName, SelectedFile_Name);
@@ -1529,7 +1614,7 @@ BEGIN
   END; {TRY}
 END; { SortFiles }
 
-PROCEDURE AddImagesToImageView(AParent : TWinControl);
+PROCEDURE AddEmptyImagesToImageView(AParent : TWinControl);
 CONST
   ImageHeight = 165;
   ImageWidth = 225;
@@ -1552,6 +1637,8 @@ VAR
   TempFileName : String;
 //  TotalTimeInSeconds : Integer;
   TypeOfFile : FileType;
+//OleGraphic: TOleGraphic;
+//fs: TFileStream;
 
 BEGIN
   TRY
@@ -1593,11 +1680,11 @@ BEGIN
       ImageCount := 0;
 //      ImageViewUnitForm.ImageViewUnitStopButton.Caption := 'Cancel Loading';
 //      ImageViewUnitForm.ImageViewUnitStopButton.Visible := True;
-      Abort := False;
+      StopLoading := False;
 
-      IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) AND NOT Abort THEN BEGIN
+      IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) THEN BEGIN
         REPEAT
-          IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) THEN
+          IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) OR StopLoading THEN
             Continue
           ELSE BEGIN
             TempFileName := SearchRec.Name;
@@ -1626,9 +1713,13 @@ BEGIN
 
                 IF (FileExists(PathName + 'snaps\' + TempFileName + '.jpg'))
                 OR (FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr))
-                THEN
-                  LoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image)
-                ELSE begin
+                AND (PtInRect(Screen.WorkAreaRect, Point(Image.Left, Image.Top))
+                    OR PtInRect(Screen.WorkAreaRect, Point(Image.Left + Image.Width, Image.Top + Image.Height)))
+                THEN BEGIN
+//                  oldLoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image);
+                  LoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image);
+                  Image.Visible := True;
+                END ELSE BEGIN
                   Bitmap := TBitmap.Create;
                   Bitmap.Width:= 100;
                   Bitmap.Height:= 100;
@@ -1637,12 +1728,15 @@ BEGIN
                   Bitmap.Canvas.Brush.Style:= bsSolid;
                   Bitmap.Canvas.Brush.Color:= clSilver;
                   Bitmap.Canvas.FillRect(Bitmap.Canvas.ClipRect);
+
+                  { Indicate that no image has been loaded }
+                  Image.Visible := False;
+
                   Image.Picture.Bitmap := Bitmap;
                 END;
 
                 { we use Hint as images don't, surprisingly, have captions }
                 Image.Hint := TempFileName;
-//                Image.Tag := ImageCount;
 
                 { Now add the label }
                 ImageLabel := TLabel.Create(NIL);
@@ -1729,21 +1823,17 @@ BEGIN
           END;
 
           Application.ProcessMessages;
-        UNTIL FindNext(SearchRec) <> 0;
+        UNTIL (FindNext(SearchRec) <> 0) OR StopLoading;
       END;
 
-      IF Abort THEN BEGIN
-        ImageViewUnitForm.Visible := False;
-        ImageViewUnitForm.Close;
-
-        Abort := False;
-      END;
+      IF StopLoading THEN
+        Application.Terminate;
     END;
   EXCEPT
     ON E : Exception DO
-      ShowMessage('ShowImages: ' + E.ClassName + ' error raised, with message: ' + E.Message);
+      ShowMessage('AddEmptyImagesToImageView: ' + E.ClassName + ' error raised, with message: ' + E.Message);
   END; {TRY}
-END; { AddImagesToImageView }
+END; { AddEmptyImagesToImageView }
 
 PROCEDURE PositionImages(AParent : TWinControl; SortType : TypeOfSort; OUT CaptionStr : String; Reposition : Boolean);
 { Fill any gaps that arise, or use for sorting the images }
@@ -1780,9 +1870,11 @@ VAR
 BEGIN
   TRY
     IF NOT Initialised THEN BEGIN
-      AddImagesToImageView(AParent);
+      AddEmptyImagesToImageView(AParent);
       Initialised := True;
     END;
+
+    CheckImagesInView;
 
     IF (LastSort = SortType) AND (SortOrder = Ascending) AND NOT Reposition THEN
       SortOrder := Descending
@@ -1793,7 +1885,7 @@ BEGIN
 
     FileList := TStringList.Create;
     TRY
-      IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) AND NOT Abort THEN BEGIN
+      IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) AND NOT StopLoading THEN BEGIN
         TRY
           REPEAT
             IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) THEN
@@ -2342,5 +2434,21 @@ BEGIN
     END;
   END;
 END; { AppDeactivate }
+
+PROCEDURE StopFileLoading;
+{ Allows the splash screen to interrupt the loading process }
+BEGIN
+  StopLoading := True;
+END; { StopFileLoading }
+
+PROCEDURE TImageViewUnitForm.WMVScroll(var Msg : TMessage);
+BEGIN
+  INHERITED;
+
+  CheckImagesInView;
+END; { WMVScroll }
+
+//                if tempfilename = 'simpsons test file 10.wmv' then
+//                null;
 
 END { ImageViewUnit }.

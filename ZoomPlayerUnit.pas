@@ -12,30 +12,32 @@ CONST
 
 TYPE
   TZoomPlayerUnitForm = CLASS(TForm)
-    BrowseButton : TButton;
-    ClearButton : TButton;
+    ZoomPlayerUnitBrowseButton: TButton;
+    ZoomPlayerUnitClearButton: TButton;
     ConnectPanel : TPanel;
-    IncomingGB : TGroupBox;
-    LabelConnectTo : TLabel;
-    LabelTextEntry : TLabel;
-    MSGMemo : TMemo;
-    PlayButton : TButton;
-    PortEdit : TEdit;
+    ZoomPlayerUnitIncomingGroupBox: TGroupBox;
+    ZoomPlayerUnitLabelConnectTo: TLabel;
+    ZoomPlayerUnitLabelTextEntry: TLabel;
+    ZoomPlayerUnitMsgMemo: TMemo;
+    ZoomPlayerUnitPlayButton: TButton;
+    ZoomPlayerUnitPortEdit: TEdit;
     SendButton : TSpeedButton;
-    TCPAddress : TEdit;
-    TCPCommand : TMemo;
-    TCPConnectButton : TButton;
-    WinAPIConnectButton : TButton;
-    TestButton : TButton;
-    PROCEDURE BrowseButtonClick(Sender : TObject);
-    PROCEDURE ClearButtonClick(Sender : TObject);
+    ZoomPlayerUnitTCPAddress: TEdit;
+    ZoomPlayerUnitTCPCommand: TMemo;
+    ZoomPlayerUnitTCPConnectButton: TButton;
+    ZoomPlayerUnitWinAPIConnectButton: TButton;
+    ZoomPlayerUnitTestButton: TButton;
+    ZoomPlayerUnitTimer: TTimer;
+    PROCEDURE ZoomPlayerUnitBrowseButtonClick(Sender : TObject);
+    PROCEDURE ZoomPlayerUnitClearButtonClick(Sender : TObject);
     PROCEDURE FormClose(Sender : TObject; VAR Action : TCloseAction);
     PROCEDURE FormShow(Sender : TObject);
-    PROCEDURE PlayButtonClick(Sender : TObject);
-    PROCEDURE SendButtonClick(Sender : TObject);
-    PROCEDURE TCPConnectButtonClick(Sender : TObject);
-    PROCEDURE WinAPIConnectButtonClick(Sender : TObject);
-    procedure TestButtonClick(Sender : TObject);
+    PROCEDURE ZoomPlayerUnitPlayButtonClick(Sender : TObject);
+    PROCEDURE ZoomPlayerUnitSendButtonClick(Sender : TObject);
+    PROCEDURE ZoomPlayerUnitTCPConnectButtonClick(Sender : TObject);
+    PROCEDURE ZoomPlayerUnitWinAPIConnectButtonClick(Sender : TObject);
+    procedure ZoomPlayerUnitTestButtonClick(Sender : TObject);
+    procedure ZoomPlayerUnitTimerTick(Sender: TObject);
   PRIVATE
     // Intercept Zoom Player MESSAGEs
     PROCEDURE ZoomPlayerEvent(VAR M : TMessage); MESSAGE CommCode;
@@ -57,6 +59,7 @@ VAR
   TCPBuf : String;
   PlaylistClearedAcknowledgmentReceived : Boolean = False;
   TotalTimeFromTCPStr : String;
+  UnableToConnectToZoomPlayer : Boolean = False;
   ZoomPlayerTCPClient : TClientSocket    = NIL;
   ZoomPlayerTCPSocket : TCustomWinSocket = NIL;
   ZoomPlayerUnitForm : TZoomPlayerUnitForm;
@@ -66,6 +69,9 @@ IMPLEMENTATION
 {$R *.dfm}
 
 USES ImageViewUnit;
+
+FUNCTION IsProgramRunning(ProgramName : String) : Boolean; External 'ListFilesDLLProject.dll'
+{ Checks to see if a given program is running }
 
 VAR
   EndOfFile : Boolean = False;
@@ -107,15 +113,15 @@ BEGIN
                2 : S1 := 'Paused';
                3 : S1 := 'Playing';
              END;
-             MSGMemo.Lines.Add(S+S1);
+             ZoomPlayerUnitMsgMemo.Lines.Add(S+S1);
            END;
     1100 : { TimeLine update (once per second) }
-           MSGMemo.Lines.Add('* Timeline : '+ StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* Timeline : '+ StringFromAtom(M.LParam));
 
     1200 : { On Screen Display Messages }
-           MSGMemo.Lines.Add('* OSD : '+ StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* OSD : '+ StringFromAtom(M.LParam));
     1201 : { On Screen Display MESSAGE has been removed }
-           MSGMemo.Lines.Add('* OSD Removed');
+           ZoomPlayerUnitMsgMemo.Lines.Add('* OSD Removed');
 
     1300 : { DVD & Media Mode changes }
            BEGIN
@@ -124,45 +130,45 @@ BEGIN
                0 : S1 := 'DVD';
                1 : S1 := 'Media';
              END;
-             MSGMemo.Lines.Add(S+S1+' mode');
+             ZoomPlayerUnitMsgMemo.Lines.Add(S+S1+' mode');
            END;
 
     1400 : { DVD Title Change }
-           MSGMemo.Lines.Add('* DVD Title : ' + IntToStr(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Title : ' + IntToStr(M.LParam));
 
     1450 : { Current Unique string identifying the DVD disc }
-           MSGMemo.Lines.Add('* DVD Unique String : ' + IntToStr(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Unique String : ' + IntToStr(M.LParam));
 
     1500 : { DVD Chapter Change }
-           MSGMemo.Lines.Add('* DVD Chapter : ' + IntToStr(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Chapter : ' + IntToStr(M.LParam));
 
     1600 : { DVD Audio Change }
-           MSGMemo.Lines.Add('* DVD Audio : ' + StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Audio : ' + StringFromAtom(M.LParam));
 
     1700 : { DVD Subtitle Change }
-           MSGMemo.Lines.Add('* DVD Subtitle : ' + StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Subtitle : ' + StringFromAtom(M.LParam));
 
     1800 : { Media File Name }
-           MSGMemo.Lines.Add('* New Media File : ' + StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* New Media File : ' + StringFromAtom(M.LParam));
 
     1855 : { end of file - FWP }
-           MSGMemo.Lines.Add('* End of file : ' + StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* End of file : ' + StringFromAtom(M.LParam));
 
     1900 : { Position of Media file in play list }
-           MSGMemo.Lines.Add('* Media File play list track number : ' + StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* Media File play list track number : ' + StringFromAtom(M.LParam));
 
     2000 : { Video Resolution }
-           MSGMemo.Lines.Add('* Video Resolution : ' + StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* Video Resolution : ' + StringFromAtom(M.LParam));
 
     2100 : { Video Frame Rate }
-           MSGMemo.Lines.Add('* Video FPS : ' + StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* Video FPS : ' + StringFromAtom(M.LParam));
 
     2200 : { AR Changed }
-           MSGMemo.Lines.Add('* AR Changed to : ' + StringFromAtom(M.LParam));
+           ZoomPlayerUnitMsgMemo.Lines.Add('* AR Changed to : ' + StringFromAtom(M.LParam));
   END;
 END; { ZoomPlayerEvent }
 
-PROCEDURE TZoomPlayerUnitForm.WinAPIConnectButtonClick(Sender : TObject);
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitWinAPIConnectButtonClick(Sender : TObject);
 VAR
   I : Integer;
 
@@ -177,7 +183,7 @@ VAR
   MyHandle: THandle;
 
 BEGIN
-  MyHandle:=FindWindow(NIL, ProgramName);
+  MyHandle := FindWindow(NIL, ProgramName);
   SendMessage(MyHandle, WM_CLOSE, 0, 0);
 END; { CloseProgram }
 
@@ -187,7 +193,7 @@ BEGIN
     DestroyZoomPlayerTCPClient;
 END; { FormClose }
 
-PROCEDURE TZoomPlayerUnitForm.TCPConnectButtonClick(Sender : TObject);
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitTCPConnectButtonClick(Sender : TObject);
 VAR
   OK : Boolean;
 
@@ -198,19 +204,19 @@ BEGIN
     DestroyZoomPlayerTCPClient;
 END; { TCPConnectButtonClick }
 
-PROCEDURE TZoomPlayerUnitForm.PlayButtonClick(Sender : TObject);
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitPlayButtonClick(Sender : TObject);
 BEGIN
   IF ZoomPlayerTCPClient <> NIL THEN
     ZoomPlayerTCPSendText('5100 fnPlay');
 END; { PlayButtonClick }
 
-PROCEDURE TZoomPlayerUnitForm.TestButtonClick(Sender : TObject);
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitTestButtonClick(Sender : TObject);
 BEGIN
   IF ZoomPlayerTCPClient <> NIL THEN
     ZoomPlayerTCPSendText('1110');
-END; { TestButtonClick }
+END; { ZoomPlayerUnitTestButtonClick }
 
-PROCEDURE TZoomPlayerUnitForm.BrowseButtonClick(Sender : TObject);
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitBrowseButtonClick(Sender : TObject);
 //VAR
 //  Browser : TTNTOpenDialog;
 BEGIN
@@ -221,7 +227,7 @@ BEGIN
 //    END;
 //    Browser.Free;
 //  END;
-END; { BrowseButtonClick }
+END; { ZoomPlayerUnitBrowseButtonClick }
 
 PROCEDURE TZoomPlayerUnitForm.FormShow(Sender : TObject);
 BEGIN
@@ -230,28 +236,28 @@ BEGIN
 //                     ZoomPlayerForm.Width,ZoomPlayerForm.Height);
 END; { FormShow }
 
-PROCEDURE TZoomPlayerUnitForm.SendButtonClick(Sender : TObject);
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitSendButtonClick(Sender : TObject);
 VAR
   I : Integer;
   S : WideString;
 
 BEGIN
   IF ZoomPlayerTCPClient <> NIL THEN BEGIN
-    IF TCPCommand.Lines.Count = 0 THEN
+    IF ZoomPlayerUnitTCPCommand.Lines.Count = 0 THEN
       Exit;
 
-    IF TCPCommand.Lines.Count > 1 THEN BEGIN
+    IF ZoomPlayerUnitTCPCommand.Lines.Count > 1 THEN BEGIN
       S := '';
-      FOR I := 0 TO TCPCommand.Lines.Count-1 DO
-        S := S + '"' + TCPCommand.Lines[I] + '" ';
+      FOR I := 0 TO ZoomPlayerUnitTCPCommand.Lines.Count-1 DO
+        S := S + '"' + ZoomPlayerUnitTCPCommand.Lines[I] + '" ';
     END ELSE
-      S := TCPCommand.Lines[0];
+      S := ZoomPlayerUnitTCPCommand.Lines[0];
 
-    MSGMemo.Text := MSGMemo.Text + 'OUT ' + FillSpace(IntToStr(GetTickCount - ConnectTS), 8) + 'ms : ' + S + CRLF;
-    ZoomPlayerTCPSendText(TCPCommand.Text);
-    TCPCommand.Clear;
+    ZoomPlayerUnitMsgMemo.Text := ZoomPlayerUnitMsgMemo.Text + 'OUT ' + FillSpace(IntToStr(GetTickCount - ConnectTS), 8) + 'ms : ' + S + CRLF;
+    ZoomPlayerTCPSendText(ZoomPlayerUnitTCPCommand.Text);
+    ZoomPlayerUnitTCPCommand.Clear;
   END;
-END; { SendButtonClick }
+END; { ZoomPlayerUnitSendButtonClick }
 
 PROCEDURE TZoomPlayerUnitForm.CreateZoomPlayerTCPClient(OUT OK : Boolean);
 VAR
@@ -287,7 +293,7 @@ BEGIN
       END;
   EXCEPT
     FreeAndNIL(ZoomPlayerTCPClient);
-    MSGMemo.Lines.Add('*** Unable to Connect');
+    ZoomPlayerUnitMsgMemo.Lines.Add('*** Unable to Connect');
     OK := False;
   END;
 END; { CreateZoomPlayerTCPClient }
@@ -308,9 +314,9 @@ PROCEDURE TZoomPlayerUnitForm.ZoomPlayerTCPClientConnect(Sender : TObject; Socke
 BEGIN
   ConnectTS := GetTickCount;
   ZoomPlayerTCPSocket := Socket;
-  MSGMemo.Lines.Add('*** Connected');
-  TCPConnectButton.Enabled := True;
-  TCPConnectButton.Caption := 'TCP Disconnect';
+  ZoomPlayerUnitMsgMemo.Lines.Add('*** Connected');
+  ZoomPlayerUnitTCPConnectButton.Enabled := True;
+  ZoomPlayerUnitTCPConnectButton.Caption := 'TCP Disconnect';
 END; { ZoomPlayerTCPClientConnect }
 
 PROCEDURE TZoomPlayerUnitForm.ZoomPlayerTCPClientDisconnect(Sender : TObject; Socket : TCustomWinSocket);
@@ -357,9 +363,9 @@ BEGIN
     WITH SelectedFileRec DO BEGIN
       IF ZoomPlayerTCPClient <> NIL THEN BEGIN
 
-        MSGMemo.Lines.Add('*** Disconnected' + CRLF);
-        TCPConnectButton.Enabled := True;
-        TCPConnectButton.Caption := 'TCP Connect';
+        ZoomPlayerUnitMsgMemo.Lines.Add('*** Disconnected' + CRLF);
+        ZoomPlayerUnitTCPConnectButton.Enabled := True;
+        ZoomPlayerUnitTCPConnectButton.Caption := 'TCP Connect';
         ZoomPlayerTCPSocket := NIL;
 
         { FWP additions }
@@ -660,7 +666,7 @@ BEGIN
       END; {CASE}
 
       Delete(TCPBuf, 1, I + 1);
-      MSGMemo.Lines.Add('IN  '
+      ZoomPlayerUnitMsgMemo.Lines.Add('IN  '
                         + FillSpace(IntToStr(GetTickCount - ConnectTS), 8) + 'ms :'
                         + ' '
                         + Copy(S, 1, 4)
@@ -693,19 +699,21 @@ PROCEDURE TZoomPlayerUnitForm.ZoomPlayerTCPClientError(Sender : TObject; Socket 
 BEGIN
   IF ErrorCode = 10061 THEN BEGIN
     Beep;
-    MSGMemo.Lines.Add('*** Error #10061 - Unable to Connect');
+    ZoomPlayerUnitMsgMemo.Lines.Add('*** Error #10061 - Unable to Connect');
     ShowMessage('Unable to Connect to ZoomPlayer');
-    CloseProgram('Zoom Player');
+    UnableToConnectToZoomPlayer := True;
+    ZoomPlayerUnitTimer.Enabled := True;
+//    CloseProgram('Zoom Player');
 //    ZoomPlayerUnitForm.Visible := True;
     ErrorCode := 0;
   END;
 
   IF ErrorCode = 10053 THEN BEGIN
-    MSGMemo.Lines.Add('*** Error #10053 - Server has disconnected/shutdown');
+    ZoomPlayerUnitMsgMemo.Lines.Add('*** Error #10053 - Server has disconnected/shutdown');
 //    ShowMessage('Server has disconnected/shutdown');
 //    ZoomPlayerUnitForm.Visible := True;
 //    MakeSound;
-    ZoomPlayerUnitForm.TCPConnectButtonClick(Sender);
+    ZoomPlayerUnitForm.ZoomPlayerUnitTCPConnectButtonClick(Sender);
     ErrorCode := 0;
   END;
 END; { ZoomPlayerTCPClientError }
@@ -716,9 +724,20 @@ BEGIN
     ZoomPlayerTCPSocket.SendText(AnsiString(S + CRLF));
 END; { ZoomPlayerTCPSendText }
 
-PROCEDURE TZoomPlayerUnitForm.ClearButtonClick(Sender : TObject);
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitClearButtonClick(Sender : TObject);
 BEGIN
-  MSGMemo.Clear;
-END; { ClearButtonClick }
+  ZoomPlayerUnitMsgMemo.Clear;
+END; { ZoomPlayerUnitClearButtonClick }
+
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitTimerTick(Sender: TObject);
+BEGIN
+  IF UnableToConnectToZoomPlayer THEN BEGIN
+    IF IsProgramRunning('zplayer.exe') THEN BEGIN
+      CloseProgram('Zoom Player');
+      UnableToConnectToZoomPlayer := False;
+      ZoomPlayerUnitTimer.Enabled := False;
+    END;
+  END;
+END; { ZoomPlayerTimerTick }
 
 END { ZoomPlayerUnit}.

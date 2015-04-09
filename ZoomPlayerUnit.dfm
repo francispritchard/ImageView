@@ -20,7 +20,7 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
     549)
   PixelsPerInch = 96
   TextHeight = 13
-  object IncomingGB: TGroupBox
+  object ZoomPlayerUnitIncomingGroupBox: TGroupBox
     Left = 6
     Top = 168
     Width = 768
@@ -31,7 +31,7 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
     DesignSize = (
       768
       366)
-    object MSGMemo: TMemo
+    object ZoomPlayerUnitMsgMemo: TMemo
       Left = 8
       Top = 20
       Width = 751
@@ -48,14 +48,14 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
       ScrollBars = ssVertical
       TabOrder = 0
     end
-    object ClearButton: TButton
+    object ZoomPlayerUnitClearButton: TButton
       Left = 634
       Top = 333
       Width = 95
       Height = 25
       Caption = 'Clear'
       TabOrder = 1
-      OnClick = ClearButtonClick
+      OnClick = ZoomPlayerUnitClearButtonClick
     end
   end
   object ConnectPanel: TPanel
@@ -70,7 +70,7 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
     DesignSize = (
       768
       157)
-    object LabelConnectTo: TLabel
+    object ZoomPlayerUnitLabelConnectTo: TLabel
       Left = 522
       Top = 13
       Width = 55
@@ -79,7 +79,7 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
       Caption = 'Connect to:'
       ExplicitLeft = 300
     end
-    object LabelTextEntry: TLabel
+    object ZoomPlayerUnitLabelTextEntry: TLabel
       Left = 8
       Top = 43
       Width = 75
@@ -88,43 +88,42 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
     end
     object SendButton: TSpeedButton
       Left = 659
-      Top = 123
+      Top = 125
       Width = 100
       Height = 25
       Anchors = [akTop, akRight]
       Caption = 'Send Text'
-      OnClick = SendButtonClick
-      ExplicitLeft = 437
+      OnClick = ZoomPlayerUnitSendButtonClick
     end
-    object WinAPIConnectButton: TButton
+    object ZoomPlayerUnitWinAPIConnectButton: TButton
       Left = 109
       Top = 7
       Width = 172
       Height = 25
       Caption = 'SendMessage (WinAPI) Connect'
       TabOrder = 0
-      OnClick = WinAPIConnectButtonClick
+      OnClick = ZoomPlayerUnitWinAPIConnectButtonClick
     end
-    object TCPConnectButton: TButton
+    object ZoomPlayerUnitTCPConnectButton: TButton
       Left = 8
-      Top = 7
+      Top = 12
       Width = 95
       Height = 25
       Caption = 'TCP Connect'
       TabOrder = 1
-      OnClick = TCPConnectButtonClick
+      OnClick = ZoomPlayerUnitTCPConnectButtonClick
     end
-    object BrowseButton: TButton
+    object ZoomPlayerUnitBrowseButton: TButton
       Left = 8
-      Top = 123
+      Top = 125
       Width = 100
       Height = 25
       Caption = 'Browse for File'
       TabOrder = 2
-      OnClick = BrowseButtonClick
+      OnClick = ZoomPlayerUnitBrowseButtonClick
     end
-    object TCPAddress: TEdit
-      Left = 584
+    object ZoomPlayerUnitTCPAddress: TEdit
+      Left = 583
       Top = 9
       Width = 117
       Height = 21
@@ -132,8 +131,8 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
       TabOrder = 4
       Text = '127.0.0.1'
     end
-    object PortEdit: TEdit
-      Left = 705
+    object ZoomPlayerUnitPortEdit: TEdit
+      Left = 706
       Top = 9
       Width = 55
       Height = 21
@@ -141,7 +140,7 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
       TabOrder = 5
       Text = '4769'
     end
-    object TCPCommand: TMemo
+    object ZoomPlayerUnitTCPCommand: TMemo
       Left = 8
       Top = 59
       Width = 751
@@ -149,25 +148,30 @@ object ZoomPlayerUnitForm: TZoomPlayerUnitForm
       Anchors = [akLeft, akTop, akRight]
       TabOrder = 6
     end
-    object PlayButton: TButton
+    object ZoomPlayerUnitPlayButton: TButton
       Left = 114
       Top = 123
       Width = 100
       Height = 25
       Caption = 'Play/Pause'
       TabOrder = 3
-      OnClick = PlayButtonClick
+      OnClick = ZoomPlayerUnitPlayButtonClick
     end
-    object TestButton: TButton
+    object ZoomPlayerUnitTestButton: TButton
       Left = 220
-      Top = 123
+      Top = 125
       Width = 100
       Height = 25
       BiDiMode = bdLeftToRight
       Caption = 'Test'
       ParentBiDiMode = False
       TabOrder = 7
-      OnClick = TestButtonClick
+      OnClick = ZoomPlayerUnitTestButtonClick
     end
+  end
+  object ZoomPlayerUnitTimer: TTimer
+    OnTimer = ZoomPlayerUnitTimerTick
+    Left = 496
+    Top = 125
   end
 end

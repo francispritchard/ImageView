@@ -19,7 +19,7 @@ object ImageViewUnitForm: TImageViewUnitForm
   SnapBuffer = 0
   WindowState = wsMaximized
   OnClick = ImageViewUnitFormClick
-  OnClose = ImageViewFormClose
+  OnClose = ImageViewUnitFormClose
   OnCreate = ImageViewUnitFormCreate
   OnKeyDown = ImageViewUnitFormKeyDown
   OnMouseWheel = ImageViewUnitFormMouseWheel

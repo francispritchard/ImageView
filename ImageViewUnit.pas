@@ -22,7 +22,7 @@ TYPE
     PROCEDURE ImageViewUnitFileNameNumbersEditKeyPress(Sender : TObject; VAR Key : Char);
     PROCEDURE ImageViewUnitFindDialogFind(Sender : TObject);
     PROCEDURE ImageViewUnitFormClick(Sender : TObject);
-    PROCEDURE ImageViewFormClose(Sender: TObject; VAR Action: TCloseAction);
+    PROCEDURE ImageViewUnitFormClose(Sender: TObject; VAR Action: TCloseAction);
     PROCEDURE ImageViewUnitFormCreate(Sender: TObject);
     PROCEDURE ImageViewUnitFormKeyDown(Sender : TObject; VAR Key : Word; ShiftState : TShiftState);
     PROCEDURE ImageViewUnitFormMouseWheel(Sender : TObject; Shift : TShiftState; WheelDelta : Integer; MousePos : TPoint; VAR Handled : Boolean);
@@ -79,22 +79,24 @@ IMPLEMENTATION
 {$R *.dfm}
 {$WARN SYMBOL_PLATFORM OFF }
 
-USES System.UItypes, ZoomPlayerUnit, ShellAPI, StrUtils, Registry, ImageViewSplash, System.Types;
+USES System.UItypes, ZoomPlayerUnit, ShellAPI, StrUtils, Registry, ImageViewSplash, System.Types, DateUtils;
 
 FUNCTION IsProgramRunning(ProgramName : String) : Boolean; External 'ListFilesDLLProject.dll'
 { Checks to see if a given program is running }
 
 TYPE
   SortOrderType = (Ascending, Descending);
-  TypeOfSort = (SortByFileName, SortByDate, SortByLastAccess, SortByType, UnknownSortType);
+  TypeOfSort = (SortByFileName, SortByDate, SortByLastAccess, SortByNumericSuffix, SortByType, UnknownSortType);
 
 CONST
   AndSnapFile = True;
   ArchiveDirectoryStr = 'Archive Directory';
   DirectoriesSectionStr = 'Directories';
+  HideImagesWhenMoviesPlayedTodayStr = 'Hide Images When Movies Played Today';
   MoveDirectory1Str = 'Move Directory 1';
   MoveDirectory2Str = 'Move Directory 2';
-  Reposition = True;
+  OptionsSectionStr = 'Options';
+  RedrawImages = True;
 
 VAR
   ArchiveDirectory : String = '';
@@ -103,6 +105,7 @@ VAR
   EligibleFiles : Integer = 0;
   FindNextFlag : Boolean = False;
   FirstUse : Boolean = True;
+  HideImagesWhenMoviesPlayedToday : Boolean = True;
   Initialised : Boolean = False;
   LastSort : TypeOfSort = UnknownSortType;
   MaxMode : Boolean = True; {may need to remove this as it is never set to false - in FWPExplorer it is a command line parameter that I don't think was ever set to false }
@@ -419,7 +422,7 @@ BEGIN
 END; { GetFileNumberSuffixFromSnapFile-1 }
 
 FUNCTION GetFileNumberSuffixFromSnapFile{2}(FileName : String; OUT NumberStr : String) : Boolean; Overload;
-{ Return the suffix (if any) found in an associated snap file. This version does't retirn whether we've found a jpeg or not. }
+{ Return the suffix (if any) found in an associated snap file. This version does't return whether we've found a jpeg or not. }
 VAR
   IsJPEG : Boolean;
 
@@ -434,9 +437,12 @@ VAR
 
 BEGIN
   TRY
+    FileStream := NIL;
+    OleGraphic := NIL;
+
     TRY
       OleGraphic := TOleGraphic.Create;
-      FileStream := TFileStream.Create(TempFileName, fmOpenRead or fmSharedenyNone);
+      FileStream := TFileStream.Create(TempFileName, fmOpenRead OR fmSharedenyNone);
       OleGraphic.LoadFromStream(FileStream);
       Image.Picture.Assign(OleGraphic);
     FINALLY
@@ -445,110 +451,110 @@ BEGIN
     END; {TRY}
   EXCEPT
     ON E : Exception DO
-      ShowMessage('LoadAndConvertImage: ' + E.ClassName +' error raised, with message: ' + E.Message);
+      ShowMessage('LoadAndConvertImage: ' + E.ClassName +' error raised, with message "' + E.Message + '" converting ' + TempFileName);
   END; {TRY}
 END; { LoadAndConvertImage }
 
-PROCEDURE oldLoadAndConvertImage(TempFileName : String; OUT Image : TImage);
-VAR
-  Bitmap, NewBitmap : TBitmap;
-  FileStream : TFileStream;
-  OleGraphic : TOleGraphic;
-  Source : TImage;
-  TempDouble : Double;
-  UseOriginalImage : Boolean;
-
-BEGIN
-  TRY
-    FileStream := TFileStream.Create(TempFileName, {fmOpenRead Or} fmSharedenyNone);
-    IF FileStream <> NIL THEN BEGIN
-      OleGraphic := TOleGraphic.Create;
-
-      TRY
-        OleGraphic.LoadFromStream(FileStream);
-      EXCEPT
-        ON E : Exception DO
-          { do nothing }; //ShowMessage('OleGraphic.LoadFromStream: ' + E.ClassName +' error raised with message: ' + E.Message);
-      END;
-
-      Source := TImage.Create(NIL);
-      Source.Picture.Assign(OleGraphic);
-
-      Bitmap := TBitmap.Create; { Converting to bitmap }
-      Bitmap.Width := Source.Picture.Width;
-      Bitmap.Height := Source.Picture.Height;
-      Bitmap.Canvas.Draw(0, 0, Source.Picture.Graphic);
-      Bitmap.Modified := True;
-
-      NewBitMap := TBitmap.Create; { Converting to bitmap }
-
-      UseOriginalImage := False;
-      IF BitMap.Width = 0 THEN
-        Image.Picture.Bitmap := Bitmap
-      ELSE BEGIN
-        TempDouble := Image.Width / Bitmap.Width;
-        TRY
-          ScaleImage(Bitmap, NewBitMap, TempDouble);
-        EXCEPT
-          ON E : Exception DO BEGIN
-            { do nothing } ; // ShowMessage('ScaleImage: ' + E.ClassName +' error raised with message: ' + E.Message);
-            UseOriginalImage := True;
-          END;
-        END; {TRY}
-      END;
-
-      IF UseOriginalImage THEN
-        Image.Picture.Bitmap := Bitmap
-      ELSE
-        Image.Picture.Bitmap := NewBitmap;
-
-      FileStream.Free;
-      OleGraphic.Free;
-      Source.Free;
-      Bitmap.Free;
-      NewBitmap.Free;
-    END;
-  EXCEPT
-    ON E : Exception DO
-      ShowMessage('LoadAndConvertImage: ' + E.ClassName +' error raised, with message: ' + E.Message);
-  END;
-END; { oldLoadAndConvertImage }
-
+//PROCEDURE oldLoadAndConvertImage(TempFileName : String; OUT Image : TImage);
+//VAR
+//  Bitmap, NewBitmap : TBitmap;
+//  FileStream : TFileStream;
+//  OleGraphic : TOleGraphic;
+//  Source : TImage;
+//  TempDouble : Double;
+//  UseOriginalImage : Boolean;
+//
+//BEGIN
+//  TRY
+//    FileStream := TFileStream.Create(TempFileName, {fmOpenRead Or} fmSharedenyNone);
+//    IF FileStream <> NIL THEN BEGIN
+//      OleGraphic := TOleGraphic.Create;
+//
+//      TRY
+//        OleGraphic.LoadFromStream(FileStream);
+//      EXCEPT
+//        ON E : Exception DO
+//          { do nothing }; //ShowMessage('OleGraphic.LoadFromStream: ' + E.ClassName +' error raised with message: ' + E.Message);
+//      END;
+//
+//      Source := TImage.Create(NIL);
+//      Source.Picture.Assign(OleGraphic);
+//
+//      Bitmap := TBitmap.Create; { Converting to bitmap }
+//      Bitmap.Width := Source.Picture.Width;
+//      Bitmap.Height := Source.Picture.Height;
+//      Bitmap.Canvas.Draw(0, 0, Source.Picture.Graphic);
+//      Bitmap.Modified := True;
+//
+//      NewBitMap := TBitmap.Create; { Converting to bitmap }
+//
+//      UseOriginalImage := False;
+//      IF BitMap.Width = 0 THEN
+//        Image.Picture.Bitmap := Bitmap
+//      ELSE BEGIN
+//        TempDouble := Image.Width / Bitmap.Width;
+//        TRY
+//          ScaleImage(Bitmap, NewBitMap, TempDouble);
+//        EXCEPT
+//          ON E : Exception DO BEGIN
+//            { do nothing } ; // ShowMessage('ScaleImage: ' + E.ClassName +' error raised with message: ' + E.Message);
+//            UseOriginalImage := True;
+//          END;
+//        END; {TRY}
+//      END;
+//
+//      IF UseOriginalImage THEN
+//        Image.Picture.Bitmap := Bitmap
+//      ELSE
+//        Image.Picture.Bitmap := NewBitmap;
+//
+//      FileStream.Free;
+//      OleGraphic.Free;
+//      Source.Free;
+//      Bitmap.Free;
+//      NewBitmap.Free;
+//    END;
+//  EXCEPT
+//    ON E : Exception DO
+//      ShowMessage('LoadAndConvertImage: ' + E.ClassName +' error raised, with message: ' + E.Message);
+//  END;
+//END; { oldLoadAndConvertImage }
+//
 PROCEDURE CheckImagesInView;
 { Do any images neeed to be added? }
-VAR
-  I : Integer;
-  IsJPEG : Boolean;
-  Done : Boolean;
-  Image : TImage;
-  NumberStr : String;
+//VAR
+//  I : Integer;
+//  IsJPEG : Boolean;
+//  Done : Boolean;
+//  Image : TImage;
+//  NumberStr : String;
 
 BEGIN
-  WITH ImageViewUnitForm DO BEGIN
-    I := 0;
-    WHILE (I < ImageViewUnitForm.ControlCount) DO BEGIN
-      IF Controls[I] IS TImage THEN BEGIN
-        WITH TImage(ImageViewUnitForm.Controls[I]) DO BEGIN
-          IF NOT Visible THEN BEGIN
-            IF PtInRect(Screen.WorkAreaRect, Point(Left, Top))
-            OR PtInRect(Screen.WorkAreaRect, Point(Left + Width, Top + Height))
-            THEN BEGIN
-              IF GetFileNumberSuffixFromSnapFile(Hint, IsJPEG, NumberStr) THEN BEGIN
-                IF IsJPEG THEN BEGIN
-                  IF NumberStr = '' THEN
-                    LoadAndConvertImage(PathName + 'Snaps\' + Hint + '.jpg', Image)
-                  ELSE;
-                    LoadAndConvertImage(PathName + 'Snaps\' + Hint + '.jpg.' + NumberStr, Image);
-                END;
-                Visible := True;
-              END;
-            END;
-          END;
-        END; {WITH}
-      END;
-      Inc(I);
-    END; {WHILE}
-  END; {WITH}
+//  WITH ImageViewUnitForm DO BEGIN
+//    I := 0;
+//    WHILE (I < ImageViewUnitForm.ControlCount) DO BEGIN
+//      IF Controls[I] IS TImage THEN BEGIN
+//        WITH TImage(ImageViewUnitForm.Controls[I]) DO BEGIN
+//          IF NOT Visible THEN BEGIN
+//            IF PtInRect(Screen.WorkAreaRect, Point(Left, Top))
+//            OR PtInRect(Screen.WorkAreaRect, Point(Left + Width, Top + Height))
+//            THEN BEGIN
+//              IF GetFileNumberSuffixFromSnapFile(Hint, IsJPEG, NumberStr) THEN BEGIN
+//                IF IsJPEG THEN BEGIN
+//                  IF NumberStr = '' THEN
+//                    LoadAndConvertImage(PathName + 'Snaps\' + Hint + '.jpg', Image)
+//                  ELSE;
+//                    LoadAndConvertImage(PathName + 'Snaps\' + Hint + '.jpg.' + NumberStr, Image);
+//                END;
+//                Visible := True;
+//              END;
+//            END;
+//          END;
+//        END; {WITH}
+//      END;
+//      Inc(I);
+//    END; {WHILE}
+//  END; {WITH}
 END; { CheckImagesInView }
 
 PROCEDURE TImageViewUnitForm.ImageViewUnitFormMouseWheel(Sender : TObject; Shift : TShiftState; WheelDelta : Integer; MousePos : TPoint; VAR Handled : Boolean);
@@ -561,25 +567,6 @@ BEGIN
   END; {WITH}
 
   CheckImagesInView;
-
-//  I := 0;
-//  WHILE (I < ImageViewUnitForm.ControlCount) DO BEGIN
-//    IF Controls[I] IS TImage THEN BEGIN
-//      WITH TImage(ImageViewUnitForm.Controls[I]) DO BEGIN
-//        IF Hint = 'simpsons test file 10.wmv' THEN BEGIN
-//          ImageViewUnitForm.Caption := Hint
-//                                       + ' Top=' + IntToStr(Top)
-//                                       + ' Left=' + IntToStr(Left);
-//
-//          IF PtInRect(Screen.WorkAreaRect, point(left, Top))
-//          OR PtInRect(Screen.WorkAreaRect, point(left + width, Top + height))
-//          THEN
-//            ImageViewUnitForm.Caption := ImageViewUnitForm.Caption + ' on screen';
-//        END;
-//      END; {WITH}
-//    END;
-//    Inc(I);
-//  END; {WHILE}
 END; { ImageViewUnitFormMouseWheel }
 
 PROCEDURE TImageViewUnitForm.ImageViewUnitFormCreate(Sender: TObject);
@@ -609,6 +596,14 @@ BEGIN
     CheckParameter('/MOVE2=', 4, MoveDirectory2);
     CheckParameter('/SORT=', 5, SortStr);
 
+// for AQTime only
+//PathName := 'C:\TEMP4\';
+//ArchiveDirectory := 'C:\TEMP4';
+//MoveDirectory1 := '';
+//MoveDirectory2 := '';
+//SortStr := 'TYPESORT'; { needs to be u/c }
+
+    { Note - we use the FWPEXplorer registry entry to share directory information }
     IniFile := TRegistryIniFile.Create('FWPExplorer');
 
     WITH IniFile DO BEGIN
@@ -619,6 +614,7 @@ BEGIN
         MoveDirectory1 := ReadString(DirectoriesSectionStr, MoveDirectory1Str, '');
       IF MoveDirectory2 = '' THEN
         MoveDirectory2 := ReadString(DirectoriesSectionStr, MoveDirectory2Str, '');
+      HideImagesWhenMoviesPlayedToday := ReadBool(OptionsSectionStr, HideImagesWhenMoviesPlayedTodayStr, False);
     END; {WITH}
   EXCEPT
     ON E : Exception DO
@@ -626,12 +622,13 @@ BEGIN
   END;
 END; { ImageViewUnitFormCreate }
 
-PROCEDURE TImageViewUnitForm.ImageViewFormClose(Sender: TObject; VAR Action: TCloseAction);
+PROCEDURE TImageViewUnitForm.ImageViewUnitFormClose(Sender: TObject; VAR Action: TCloseAction);
 VAR
   IniFile : TRegistryIniFile;
 
 BEGIN
   TRY
+    { Note - we use the FWPEXplorer registry entry to share directory information }
     IniFile := TRegistryIniFile.Create('FWPExplorer');
 
     WITH IniFile DO BEGIN
@@ -639,6 +636,7 @@ BEGIN
       WriteString(DirectoriesSectionStr, ArchiveDirectoryStr, ArchiveDirectory);
       WriteString(DirectoriesSectionStr, MoveDirectory1Str, MoveDirectory1);
       WriteString(DirectoriesSectionStr, MoveDirectory2Str, MoveDirectory2);
+      WriteBool(OptionsSectionStr, HideImagesWhenMoviesPlayedTodayStr, HideImagesWhenMoviesPlayedToday);
     END; {WITH}
     IniFile.Free;
 
@@ -1173,6 +1171,7 @@ PROCEDURE TImageViewUnitForm.MouseDownEvent(Sender : TObject; Button : TMouseBut
     ShellStrPtr : PWideChar;
     SS : Word;
     StartTime : TDateTime;
+    TempImage : TImage;
 
   BEGIN
     TRY
@@ -1227,6 +1226,11 @@ PROCEDURE TImageViewUnitForm.MouseDownEvent(Sender : TObject; Button : TMouseBut
               UNTIL IsProgramRunning('zplayer.exe');
 
               ZoomPlayerUnitForm.CreateZoomPlayerTCPClient(OK);
+
+              IF OK AND HideImagesWhenMoviesPlayedToday THEN BEGIN
+                TempImage := FindSpecificImageOnImageViewUnitForm(TempFileName);
+                TempImage.Visible := False;
+              END;
             END ELSE
               IF VLC THEN BEGIN
                 Minutes := (HH * 60) + (MM * 60);
@@ -1361,7 +1365,7 @@ BEGIN
               Screen.Cursor := SaveCursor;
 
               TempImage := FindSpecificImageOnImageViewUnitForm(SelectedFile_Name);
-              oldLoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage); { +++ }
+              LoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage); { +++ }
             END ELSE
               IF ssCtrl IN ShiftState THEN BEGIN
                 { we need a replacement image - this takes some time so show the hourglass }
@@ -1376,7 +1380,7 @@ BEGIN
                 Screen.Cursor := SaveCursor;
 
                 TempImage := FindSpecificImageOnImageViewUnitForm(SelectedFile_Name);
-                oldLoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage); { +++ }
+                LoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage); { +++ }
               END ELSE BEGIN
                 TurnSelectedFileRecRectangleVisibilityOn(SelectedFile_Name);
                 PrepareFiles(PathName, SelectedFile_Name);
@@ -1577,6 +1581,8 @@ VAR
   FileType1, FileType2 : String;
 
 BEGIN
+  List.NameValueSeparator := '?';
+
   Result := CompareNewAlphaNumericStr(FileName1, FileName2);
 
   TRY
@@ -1598,7 +1604,7 @@ BEGIN
           DateTime2 := StrToDateTime(List.Values[List.Names[Index2]]);
           Result := -CompareDates(DateTime1, DateTime2);
         END;
-      SortByType:
+      SortByNumericSuffix, SortByType:
         BEGIN
           FileType1 := List.Values[List.Names[Index1]];
           FileType2 := List.Values[List.Names[Index2]];
@@ -1614,14 +1620,13 @@ BEGIN
   END; {TRY}
 END; { SortFiles }
 
-PROCEDURE AddEmptyImagesToImageView(AParent : TWinControl);
-CONST
-  ImageHeight = 165;
-  ImageWidth = 225;
+PROCEDURE veryoldAddEmptyImagesToImageView(AParent : TWinControl);
+//CONST
+//  ImageHeight = 165;
+//  ImageWidth = 225;
 
 VAR
   Bitmap : TBitMap;
-  DirStrPos : Integer;
 //  ElapsedTimeInSeconds : Integer;
 //  HH : Integer;
   Image : TImage;
@@ -1642,189 +1647,586 @@ VAR
 
 BEGIN
   TRY
-    DirStrPos := Pos('/DIR=', UpperCase(ParamStr(1)));
-    IF DirStrPos = 0 THEN
-      ShowMessage('No directory specified - press any key to exit')
-    ELSE BEGIN
-      EligibleFiles := 0;
+    EligibleFiles := 0;
 
-      IF PathName[Length(PathName)] <> '\' THEN
-        PathName := PathName + '\';
+    IF PathName[Length(PathName)] <> '\' THEN
+      PathName := PathName + '\';
 
-      { First count how many potential images there are }
-      TotalFileCount := 0;
-      IF FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
-        REPEAT
-          IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) THEN
-            Continue
-          ELSE BEGIN
-            Inc(TotalFileCount);
+    { First count how many potential images there are }
+    TotalFileCount := 0;
+    IF FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
+      REPEAT
+        IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) THEN
+          Continue
+        ELSE BEGIN
+          Inc(TotalFileCount);
 
-            IF FileTypeSuffixFound(SearchRec.Name) THEN BEGIN
-              IF FileTypeSuffixFound(SearchRec.Name, TypeOfFile)
-              AND (TypeOfFile = VideoFile)
-              AND GetFileNumberSuffixFromSnapFile(SearchRec.Name, NumberStr)
-              AND (Pos('.lnk', SearchRec.Name) = 0)
-              AND (Pos('.s', SearchRec.Name) = 0)
-              AND (Pos('.d', SearchRec.Name) = 0)
-              AND (Pos('.db', SearchRec.Name) = 0)
-              THEN
-                Inc(EligibleFiles);
-            END;
+          IF FileTypeSuffixFound(SearchRec.Name) THEN BEGIN
+            IF FileTypeSuffixFound(SearchRec.Name, TypeOfFile)
+            AND (TypeOfFile = VideoFile)
+            AND GetFileNumberSuffixFromSnapFile(SearchRec.Name, NumberStr)
+            AND (Pos('.lnk', SearchRec.Name) = 0)
+            AND (Pos('.s', SearchRec.Name) = 0)
+            AND (Pos('.d', SearchRec.Name) = 0)
+            AND (Pos('.db', SearchRec.Name) = 0)
+            THEN
+              Inc(EligibleFiles);
           END;
-        UNTIL FindNext(SearchRec) <> 0;
-      END;
+        END;
+      UNTIL FindNext(SearchRec) <> 0;
+    END;
 
-      ImageViewUnitForm.Width := Screen.WorkAreaWidth;
+    ImageViewUnitForm.Width := Screen.WorkAreaWidth;
 
-      ImageCount := 0;
-//      ImageViewUnitForm.ImageViewUnitStopButton.Caption := 'Cancel Loading';
-//      ImageViewUnitForm.ImageViewUnitStopButton.Visible := True;
-      StopLoading := False;
+    ImageCount := 0;
+    StopLoading := False;
 
-      IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) THEN BEGIN
-        REPEAT
-          IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) OR StopLoading THEN
-            Continue
-          ELSE BEGIN
-            TempFileName := SearchRec.Name;
+    IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) THEN BEGIN
+      REPEAT
+        IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) OR StopLoading THEN
+          Continue
+        ELSE BEGIN
+          TempFileName := SearchRec.Name;
 
-            { Get the duration from the snap file }
-            IF GetFileNumberSuffixFromSnapFile(TempFileName, NumberStr) THEN BEGIN
-              IF (Copy(TempFileName, Length(TempFileName) - 1) <> '.d')
-              AND (Copy(TempFileName, Length(TempFileName) - 1) <> '.s')
-              AND (Copy(TempFileName, Length(TempFileName) - 2) <> '.db')
-              AND ((FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr))
-                  OR (FileExists(PathName + 'snaps\' + TempFileName + '.txt.' + NumberStr)))
+          { Get the duration from the snap file }
+          IF GetFileNumberSuffixFromSnapFile(TempFileName, NumberStr) THEN BEGIN
+            IF (Copy(TempFileName, Length(TempFileName) - 1) <> '.d')
+            AND (Copy(TempFileName, Length(TempFileName) - 3) <> '.lnk')
+            AND (Copy(TempFileName, Length(TempFileName) - 1) <> '.s')
+            AND (Copy(TempFileName, Length(TempFileName) - 2) <> '.db')
+            AND ((FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr)) OR (FileExists(PathName + 'snaps\' + TempFileName + '.txt.' + NumberStr)))
+            THEN BEGIN
+              Application.ProcessMessages;
+
+              Image := TImage.Create(NIL);
+
+              Image.Parent := AParent;
+              Image.Center := True;
+              Image.Stretch := True;
+              Image.Visible := False;
+
+//              Image.Width := ImageWidth;
+//              Image.Height := ImageHeight;
+
+              Image.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+
+              IF (FileExists(PathName + 'snaps\' + TempFileName + '.jpg'))
+              OR (FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr))
+//                AND (PtInRect(Screen.WorkAreaRect, Point(Image.Left, Image.Top))
+//                    OR PtInRect(Screen.WorkAreaRect, Point(Image.Left + Image.Width, Image.Top + Image.Height)))
               THEN BEGIN
-                Application.ProcessMessages;
+                LoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image);
+                Image.Visible := True;
+              END ELSE BEGIN
+                Bitmap := TBitmap.Create;
+                Bitmap.Width:= 100;
+                Bitmap.Height:= 100;
+                Bitmap.Transparent:= True;
+                Bitmap.TransparentColor:= clWhite;
+                Bitmap.Canvas.Brush.Style:= bsSolid;
+                Bitmap.Canvas.Brush.Color:= clSilver;
+                Bitmap.Canvas.FillRect(Bitmap.Canvas.ClipRect);
 
-                Image := TImage.Create(NIL);
-
-                Image.Parent := AParent;
-                Image.Center := True;
-                Image.Stretch := True;
+                { Indicate that no image has been loaded }
                 Image.Visible := False;
 
-                Image.Width := ImageWidth;
-                Image.Height := ImageHeight;
-
-                Image.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
-
-                IF (FileExists(PathName + 'snaps\' + TempFileName + '.jpg'))
-                OR (FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr))
-                AND (PtInRect(Screen.WorkAreaRect, Point(Image.Left, Image.Top))
-                    OR PtInRect(Screen.WorkAreaRect, Point(Image.Left + Image.Width, Image.Top + Image.Height)))
-                THEN BEGIN
-//                  oldLoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image);
-                  LoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image);
-                  Image.Visible := True;
-                END ELSE BEGIN
-                  Bitmap := TBitmap.Create;
-                  Bitmap.Width:= 100;
-                  Bitmap.Height:= 100;
-                  Bitmap.Transparent:= True;
-                  Bitmap.TransparentColor:= clWhite;
-                  Bitmap.Canvas.Brush.Style:= bsSolid;
-                  Bitmap.Canvas.Brush.Color:= clSilver;
-                  Bitmap.Canvas.FillRect(Bitmap.Canvas.ClipRect);
-
-                  { Indicate that no image has been loaded }
-                  Image.Visible := False;
-
-                  Image.Picture.Bitmap := Bitmap;
-                END;
-
-                { we use Hint as images don't, surprisingly, have captions }
-                Image.Hint := TempFileName;
-
-                { Now add the label }
-                ImageLabel := TLabel.Create(NIL);
-                ImageLabel.Parent := AParent;
-                ImageLabel.Left := Image.Left;
-                ImageLabel.Top := Image.Top + ImageHeight;
-                ImageLabel.Visible := True;
-                ImageLabel.Enabled := True;
-                ImageLabel.Font.Color := clWindowText;
-                ImageLabel.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
-                ImageLabel.Visible := False;
-
-                { The following three lines of code have to be in this exact order so that the word wrapping works properly, goodness knows why! }
-                ImageLabel.WordWrap := True;
-        //        IF NOT TestMode OR (Pos(':', TempNumbersStr) = 0) THEN
-                IF NumberStr = '' THEN
-                  ImageLabel.Caption := TempFileName
-                ELSE
-                  ImageLabel.Caption := TempFileName + '.' + NumberStr;
-        //        ELSE BEGIN
-        //          PercentageStr := ExplorerForm.ListView.Items[ImageCount].Caption;
-        //          PercentageStr := TempFileName2;
-        //
-        //          TotalTimeFromTCPStr := Copy(TempNumbersStr, 6, 4);
-        //          IF Length(TotalTimeFromTCPStr) = 6 THEN BEGIN
-        //            HH := StrToInt(Copy(TotalTimeFromTCPStr, 1, 2));
-        //            MM := StrToInt(Copy(TotalTimeFromTCPStr, 3, 2));
-        //            SS := StrToInt(Copy(TotalTimeFromTCPStr, 5, 2));
-        //            TotalTimeInSeconds := (HH * 360) * (MM * 60) + SS;
-        //          END ELSE BEGIN
-        //            MM := StrToInt(Copy(TotalTimeFromTCPStr, 1, 2));
-        //            SS := StrToInt(Copy(TotalTimeFromTCPStr, 3, 2));
-        //            TotalTimeInSeconds := (MM * 60) + SS;
-        //          END;
-        //
-        //          ElapsedTimeFromTCPStr := Copy(TempNumbersStr, 1, 4);
-        //          IF Length(ElapsedTimeFromTCPStr) = 6 THEN BEGIN
-        //            HH := StrToInt(Copy(ElapsedTimeFromTCPStr, 1, 2));
-        //            MM := StrToInt(Copy(ElapsedTimeFromTCPStr, 3, 2));
-        //            SS := StrToInt(Copy(ElapsedTimeFromTCPStr, 5, 2));
-        //            ElapsedTimeInSeconds := (HH * 360) * (MM * 60) + SS;
-        //          END ELSE BEGIN
-        //            MM := StrToInt(Copy(ElapsedTimeFromTCPStr, 1, 2));
-        //            SS := StrToInt(Copy(ElapsedTimeFromTCPStr, 3, 2));
-        //            ElapsedTimeInSeconds := (MM * 60) + SS;
-        //          END;
-        //
-        //          { Convert the difference to a percentage }
-        //          Percentage := 100 DIV (TotalTimeInSeconds DIV ElapsedTimeInSeconds);
-        //          PercentageStr := IntToStr(Percentage) + '%';
-        //
-        //          ImageLabel.Caption := TempFileName2 + ' ' + PercentageStr;
-        //        END;
-                ImageLabel.Width := Image.Width;
-
-                { And prepare a border around the image so we can see which one we've selected. We're using a TShape control rather than FrameRect as it's a control and is
-                  permanent.
-                }
-                ImageFocusRectangle := TShape.Create(NIL);
-                WITH ImageFocusRectangle DO BEGIN
-                  Parent := AParent;
-                  Pen.Color := clAqua;
-                  Pen.Width := 5;
-                  Visible := False;
-                  Shape := stRectangle;
-                  Brush.Style := bsClear;
-
-                  Left := Image.Left - 5;
-                  Top := Image.Top - 5;
-                  Width := Image.Width + 10;
-                  Height := Image.Height + 25;
-
-                  OnMouseDown := ImageViewUnitForm.MouseDownEvent;
-                  Hint := TempFileName;
-                END; {WITH}
+                Image.Picture.Bitmap := Bitmap;
               END;
 
-              Inc(ImageCount);
-              IF ImageCount = EligibleFiles THEN
-                WriteSplashLoadingLabel(IntToStr(EligibleFiles) + ' Files Loaded')
-              ELSE
-                WriteSplashLoadingLabel(IntToStr(ImageCount) + ' / ' + IntToStr(EligibleFiles) + ' Loaded');
-            END;
-          END;
+              { we use Hint as images don't, surprisingly, have captions }
+              Image.Hint := TempFileName;
 
-          Application.ProcessMessages;
-        UNTIL (FindNext(SearchRec) <> 0) OR StopLoading;
-      END;
+              { Now add the label }
+              ImageLabel := TLabel.Create(NIL);
+              ImageLabel.Parent := AParent;
+//              ImageLabel.Left := Image.Left;
+//              ImageLabel.Top := Image.Top + ImageHeight;
+              ImageLabel.Visible := True;
+              ImageLabel.Enabled := True;
+              ImageLabel.Font.Color := clWindowText;
+              ImageLabel.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+              ImageLabel.Visible := False;
+
+              { The following three lines of code have to be in this exact order so that the word wrapping works properly, goodness knows why! }
+              ImageLabel.WordWrap := True;
+      //        IF NOT TestMode OR (Pos(':', TempNumbersStr) = 0) THEN
+              IF NumberStr = '' THEN
+                ImageLabel.Caption := TempFileName
+              ELSE
+                ImageLabel.Caption := TempFileName + '.' + NumberStr;
+      //        ELSE BEGIN
+      //          PercentageStr := ExplorerForm.ListView.Items[ImageCount].Caption;
+      //          PercentageStr := TempFileName2;
+      //
+      //          TotalTimeFromTCPStr := Copy(TempNumbersStr, 6, 4);
+      //          IF Length(TotalTimeFromTCPStr) = 6 THEN BEGIN
+      //            HH := StrToInt(Copy(TotalTimeFromTCPStr, 1, 2));
+      //            MM := StrToInt(Copy(TotalTimeFromTCPStr, 3, 2));
+      //            SS := StrToInt(Copy(TotalTimeFromTCPStr, 5, 2));
+      //            TotalTimeInSeconds := (HH * 360) * (MM * 60) + SS;
+      //          END ELSE BEGIN
+      //            MM := StrToInt(Copy(TotalTimeFromTCPStr, 1, 2));
+      //            SS := StrToInt(Copy(TotalTimeFromTCPStr, 3, 2));
+      //            TotalTimeInSeconds := (MM * 60) + SS;
+      //          END;
+      //
+      //          ElapsedTimeFromTCPStr := Copy(TempNumbersStr, 1, 4);
+      //          IF Length(ElapsedTimeFromTCPStr) = 6 THEN BEGIN
+      //            HH := StrToInt(Copy(ElapsedTimeFromTCPStr, 1, 2));
+      //            MM := StrToInt(Copy(ElapsedTimeFromTCPStr, 3, 2));
+      //            SS := StrToInt(Copy(ElapsedTimeFromTCPStr, 5, 2));
+      //            ElapsedTimeInSeconds := (HH * 360) * (MM * 60) + SS;
+      //          END ELSE BEGIN
+      //            MM := StrToInt(Copy(ElapsedTimeFromTCPStr, 1, 2));
+      //            SS := StrToInt(Copy(ElapsedTimeFromTCPStr, 3, 2));
+      //            ElapsedTimeInSeconds := (MM * 60) + SS;
+      //          END;
+      //
+      //          { Convert the difference to a percentage }
+      //          Percentage := 100 DIV (TotalTimeInSeconds DIV ElapsedTimeInSeconds);
+      //          PercentageStr := IntToStr(Percentage) + '%';
+      //
+      //          ImageLabel.Caption := TempFileName2 + ' ' + PercentageStr;
+      //        END;
+//              ImageLabel.Width := Image.Width;
+
+              { And prepare a border around the image so we can see which one we've selected. We're using a TShape control rather than FrameRect as it's a control and is
+                permanent.
+              }
+              ImageFocusRectangle := TShape.Create(NIL);
+              WITH ImageFocusRectangle DO BEGIN
+                Parent := AParent;
+                Pen.Color := clAqua;
+                Pen.Width := 5;
+                Visible := False;
+                Shape := stRectangle;
+                Brush.Style := bsClear;
+
+//                Left := Image.Left - 5;
+//                Top := Image.Top - 5;
+//                Width := Image.Width + 10;
+//                Height := Image.Height + 25;
+
+                OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+                Hint := TempFileName;
+              END; {WITH}
+            END;
+
+            Inc(ImageCount);
+            IF ImageCount = EligibleFiles THEN
+              WriteSplashLoadingLabel(IntToStr(EligibleFiles) + ' Files Loaded')
+            ELSE
+              WriteSplashLoadingLabel(IntToStr(ImageCount) + ' / ' + IntToStr(EligibleFiles) + ' Loaded');
+          END;
+        END;
+
+        Application.ProcessMessages;
+      UNTIL (FindNext(SearchRec) <> 0) OR StopLoading;
+
+      IF StopLoading THEN
+        Application.Terminate;
+    END;
+  EXCEPT
+    ON E : Exception DO
+      ShowMessage('AddEmptyImagesToImageView: ' + E.ClassName + ' error raised, with message: ' + E.Message);
+  END; {TRY}
+END; { veryoldAddEmptyImagesToImageView }
+
+PROCEDURE AddEmptyImagesToImageView(AParent : TWinControl);
+VAR
+  Bitmap : TBitMap;
+//  ElapsedTimeInSeconds : Integer;
+//  HH : Integer;
+  Image : TImage;
+  ImageCount : Integer;
+  ImageFocusRectangle : TShape;
+  ImageLabel : TLabel;
+//  MM : Integer;
+  NumberStr : String;
+//  Percentage : Integer;
+//  PercentageStr : String;
+  SearchRec : TSearchRec;
+//  SS : Integer;
+  TempFileName : String;
+//  TotalTimeInSeconds : Integer;
+  TypeOfFile : FileType;
+//OleGraphic: TOleGraphic;
+//fs: TFileStream;
+
+testfiletext : text;
+em : string;
+testfilename : string;
+writingerrorlog : boolean;
+
+BEGIN
+  TRY
+    EligibleFiles := 0;
+
+    IF PathName[Length(PathName)] <> '\' THEN
+      PathName := PathName + '\';
+
+writingerrorlog := false;
+if writingerrorlog then begin
+  testfilename := pathName + 'test file.txt';
+  openoutputfileok(testfiletext, testfilename, em, true);
+end;
+
+    { First count how many potential images there are }
+    TotalFileCount := 0;
+    IF FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
+      REPEAT
+        IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) THEN
+          Continue
+        ELSE BEGIN
+          Inc(TotalFileCount);
+
+          IF FileTypeSuffixFound(SearchRec.Name) THEN BEGIN
+            IF FileTypeSuffixFound(SearchRec.Name, TypeOfFile)
+            AND (TypeOfFile = VideoFile)
+            AND GetFileNumberSuffixFromSnapFile(SearchRec.Name, NumberStr)
+            AND (Pos('.lnk', SearchRec.Name) = 0)
+            AND (Pos('.s', SearchRec.Name) = 0)
+            AND (Pos('.d', SearchRec.Name) = 0)
+            AND (Pos('.db', SearchRec.Name) = 0)
+            THEN
+begin
+              Inc(EligibleFiles);
+if writingerrorlog then
+  writeln(testfiletext, searchrec.Name);
+end;
+          END;
+        END;
+      UNTIL FindNext(SearchRec) <> 0;
+    END;
+
+if writingerrorlog then
+  writeln(testfiletext, '-------------------------------------');
+
+    ImageViewUnitForm.Width := Screen.WorkAreaWidth;
+
+    ImageCount := 0;
+    StopLoading := False;
+
+    IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) THEN BEGIN
+      REPEAT
+        IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) OR StopLoading THEN
+          Continue
+        ELSE BEGIN
+          TempFileName := SearchRec.Name;
+
+          { Get the duration from the snap file }
+          IF GetFileNumberSuffixFromSnapFile(TempFileName, NumberStr) THEN BEGIN
+            IF (Copy(TempFileName, Length(TempFileName) - 1) <> '.d')
+            AND (Copy(TempFileName, Length(TempFileName) - 3) <> '.lnk')
+            AND (Copy(TempFileName, Length(TempFileName) - 1) <> '.s')
+            AND (Copy(TempFileName, Length(TempFileName) - 2) <> '.db')
+            AND ((FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr)) OR (FileExists(PathName + 'snaps\' + TempFileName + '.txt.' + NumberStr)))
+            THEN BEGIN
+              Application.ProcessMessages;
+if writingerrorlog then
+  writeln(testfiletext, searchrec.Name);
+
+              Image := TImage.Create(NIL);
+
+              Image.Parent := AParent;
+              Image.Center := True;
+              Image.Stretch := True;
+              Image.Visible := False;
+              Image.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+
+              IF FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr) THEN BEGIN
+                LoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image);
+                Image.Visible := True;
+              END ELSE BEGIN
+                Bitmap := TBitmap.Create;
+                Bitmap.Width:= 100;
+                Bitmap.Height:= 100;
+                Bitmap.Transparent:= True;
+                Bitmap.TransparentColor:= clWhite;
+                Bitmap.Canvas.Brush.Style:= bsSolid;
+                Bitmap.Canvas.Brush.Color:= clSilver;
+                Bitmap.Canvas.FillRect(Bitmap.Canvas.ClipRect);
+
+                { Indicate that no image has been loaded }
+                Image.Visible := False;
+
+                Image.Picture.Bitmap := Bitmap;
+              END;
+
+              { we use Hint as images don't, surprisingly, have captions }
+              Image.Hint := TempFileName;
+
+              { Now add the label }
+              ImageLabel := TLabel.Create(NIL);
+              ImageLabel.Parent := AParent;
+              ImageLabel.Visible := True;
+              ImageLabel.Enabled := True;
+              ImageLabel.Font.Color := clWindowText;
+              ImageLabel.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+              ImageLabel.Visible := False;
+
+              { The following three lines of code have to be in this exact order so that the word wrapping works properly, goodness knows why! }
+              ImageLabel.WordWrap := True;
+      //        IF NOT TestMode OR (Pos(':', TempNumbersStr) = 0) THEN
+              IF NumberStr = '' THEN
+                ImageLabel.Caption := TempFileName
+              ELSE
+                ImageLabel.Caption := TempFileName + '.' + NumberStr;
+      //        ELSE BEGIN
+      //          PercentageStr := ExplorerForm.ListView.Items[ImageCount].Caption;
+      //          PercentageStr := TempFileName2;
+      //
+      //          TotalTimeFromTCPStr := Copy(TempNumbersStr, 6, 4);
+      //          IF Length(TotalTimeFromTCPStr) = 6 THEN BEGIN
+      //            HH := StrToInt(Copy(TotalTimeFromTCPStr, 1, 2));
+      //            MM := StrToInt(Copy(TotalTimeFromTCPStr, 3, 2));
+      //            SS := StrToInt(Copy(TotalTimeFromTCPStr, 5, 2));
+      //            TotalTimeInSeconds := (HH * 360) * (MM * 60) + SS;
+      //          END ELSE BEGIN
+      //            MM := StrToInt(Copy(TotalTimeFromTCPStr, 1, 2));
+      //            SS := StrToInt(Copy(TotalTimeFromTCPStr, 3, 2));
+      //            TotalTimeInSeconds := (MM * 60) + SS;
+      //          END;
+      //
+      //          ElapsedTimeFromTCPStr := Copy(TempNumbersStr, 1, 4);
+      //          IF Length(ElapsedTimeFromTCPStr) = 6 THEN BEGIN
+      //            HH := StrToInt(Copy(ElapsedTimeFromTCPStr, 1, 2));
+      //            MM := StrToInt(Copy(ElapsedTimeFromTCPStr, 3, 2));
+      //            SS := StrToInt(Copy(ElapsedTimeFromTCPStr, 5, 2));
+      //            ElapsedTimeInSeconds := (HH * 360) * (MM * 60) + SS;
+      //          END ELSE BEGIN
+      //            MM := StrToInt(Copy(ElapsedTimeFromTCPStr, 1, 2));
+      //            SS := StrToInt(Copy(ElapsedTimeFromTCPStr, 3, 2));
+      //            ElapsedTimeInSeconds := (MM * 60) + SS;
+      //          END;
+      //
+      //          { Convert the difference to a percentage }
+      //          Percentage := 100 DIV (TotalTimeInSeconds DIV ElapsedTimeInSeconds);
+      //          PercentageStr := IntToStr(Percentage) + '%';
+      //
+      //          ImageLabel.Caption := TempFileName2 + ' ' + PercentageStr;
+      //        END;
+
+              { And prepare a border around the image so we can see which one we've selected. We're using a TShape control rather than FrameRect as it's a control and is
+                permanent.
+              }
+              ImageFocusRectangle := TShape.Create(NIL);
+              WITH ImageFocusRectangle DO BEGIN
+                Parent := AParent;
+                Pen.Color := clAqua;
+                Pen.Width := 5;
+                Visible := False;
+                Shape := stRectangle;
+                Brush.Style := bsClear;
+                OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+                Hint := TempFileName;
+              END; {WITH}
+            END;
+
+            Inc(ImageCount);
+            IF ImageCount = EligibleFiles THEN
+              WriteSplashLoadingLabel(IntToStr(EligibleFiles) + ' Files Loaded')
+            ELSE
+              WriteSplashLoadingLabel(IntToStr(ImageCount) + ' / ' + IntToStr(EligibleFiles) + ' Loaded');
+          END;
+        END;
+
+        Application.ProcessMessages;
+      UNTIL (FindNext(SearchRec) <> 0) OR StopLoading;
+
+      IF StopLoading THEN
+        Application.Terminate;
+    END;
+
+if writingerrorlog then
+  Closeoutputfile(testfiletext, testfilename);
+
+  EXCEPT
+    ON E : Exception DO
+      ShowMessage('AddEmptyImagesToImageView: ' + E.ClassName + ' error raised, with message: ' + E.Message);
+  END; {TRY}
+END; { oldAddEmptyImagesToImageView }
+
+PROCEDURE newAddEmptyImagesToImageView(AParent : TWinControl);
+VAR
+//  Bitmap : TBitMap;
+//  ElapsedTimeInSeconds : Integer;
+//  HH : Integer;
+  Image : TImage;
+  ImageCount : Integer;
+  ImageFocusRectangle : TShape;
+  ImageLabel : TLabel;
+//  MM : Integer;
+  NumberStr : String;
+//  Percentage : Integer;
+//  PercentageStr : String;
+  SearchRec : TSearchRec;
+//  SS : Integer;
+  TempFileName : String;
+//  TotalTimeInSeconds : Integer;
+  TypeOfFile : FileType;
+//OleGraphic: TOleGraphic;
+//fs: TFileStream;
+
+BEGIN
+  TRY
+    EligibleFiles := 0;
+
+    IF PathName[Length(PathName)] <> '\' THEN
+      PathName := PathName + '\';
+
+    { First count how many potential images there are }
+    TotalFileCount := 0;
+    IF FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
+      REPEAT
+        IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) THEN
+          Continue
+        ELSE BEGIN
+          Inc(TotalFileCount);
+
+          IF FileTypeSuffixFound(SearchRec.Name) THEN BEGIN
+            IF FileTypeSuffixFound(SearchRec.Name, TypeOfFile)
+            AND (TypeOfFile = VideoFile)
+            AND GetFileNumberSuffixFromSnapFile(SearchRec.Name, NumberStr)
+            AND (Pos('.lnk', SearchRec.Name) = 0)
+            AND (Pos('.s', SearchRec.Name) = 0)
+            AND (Pos('.d', SearchRec.Name) = 0)
+            AND (Pos('.db', SearchRec.Name) = 0)
+            THEN
+              Inc(EligibleFiles);
+          END;
+        END;
+      UNTIL FindNext(SearchRec) <> 0;
+    END;
+
+    ImageViewUnitForm.Width := Screen.WorkAreaWidth;
+
+    ImageCount := 0;
+    StopLoading := False;
+
+    IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) THEN BEGIN
+      REPEAT
+        IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) OR StopLoading THEN
+          Continue
+        ELSE BEGIN
+          TempFileName := SearchRec.Name;
+
+          { Get the duration from the snap file }
+          IF GetFileNumberSuffixFromSnapFile(TempFileName, NumberStr) THEN BEGIN
+            IF (Copy(TempFileName, Length(TempFileName) - 1) <> '.d')
+            AND (Copy(TempFileName, Length(TempFileName) - 3) <> '.lnk')
+            AND (Copy(TempFileName, Length(TempFileName) - 1) <> '.s')
+            AND (Copy(TempFileName, Length(TempFileName) - 2) <> '.db')
+            AND ((FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr)) OR (FileExists(PathName + 'snaps\' + TempFileName + '.txt.' + NumberStr)))
+            THEN BEGIN
+              Application.ProcessMessages;
+
+              Image := TImage.Create(NIL);
+
+              Image.Parent := AParent;
+//              Image.Center := True;
+//              Image.Stretch := True;
+//              Image.Visible := False;
+//              Image.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+//              { we use Hint as images don't, surprisingly, have captions }
+//              Image.Hint := TempFileName;
+//
+//              IF FileExists(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr) THEN BEGIN
+//                LoadAndConvertImage(PathName + 'snaps\' + TempFileName + '.jpg.' + NumberStr, Image);
+//                Image.Visible := True;
+//              END ELSE BEGIN
+//                Bitmap := TBitmap.Create;
+//                Bitmap.Width:= 100;
+//                Bitmap.Height:= 100;
+//                Bitmap.Transparent:= True;
+//                Bitmap.TransparentColor:= clWhite;
+//                Bitmap.Canvas.Brush.Style:= bsSolid;
+//                Bitmap.Canvas.Brush.Color:= clSilver;
+//                Bitmap.Canvas.FillRect(Bitmap.Canvas.ClipRect);
+//
+//                { Indicate that no image has been loaded }
+//                Image.Visible := False;
+//
+//                Image.Picture.Bitmap := Bitmap;
+//              END;
+//
+//              { Now add the label }
+              ImageLabel := TLabel.Create(NIL);
+              ImageLabel.Parent := AParent;
+//              ImageLabel.Visible := True;
+//              ImageLabel.Enabled := True;
+//              ImageLabel.Font.Color := clWindowText;
+//              ImageLabel.OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+//              ImageLabel.Visible := False;
+//
+//              { The following three lines of code have to be in this exact order so that the word wrapping works properly, goodness knows why! }
+//              ImageLabel.WordWrap := True;
+//      //        IF NOT TestMode OR (Pos(':', TempNumbersStr) = 0) THEN
+              IF NumberStr = '' THEN
+                ImageLabel.Caption := TempFileName
+              ELSE
+                ImageLabel.Caption := TempFileName + '.' + NumberStr;
+      //        ELSE BEGIN
+      //          PercentageStr := ExplorerForm.ListView.Items[ImageCount].Caption;
+      //          PercentageStr := TempFileName2;
+      //
+      //          TotalTimeFromTCPStr := Copy(TempNumbersStr, 6, 4);
+      //          IF Length(TotalTimeFromTCPStr) = 6 THEN BEGIN
+      //            HH := StrToInt(Copy(TotalTimeFromTCPStr, 1, 2));
+      //            MM := StrToInt(Copy(TotalTimeFromTCPStr, 3, 2));
+      //            SS := StrToInt(Copy(TotalTimeFromTCPStr, 5, 2));
+      //            TotalTimeInSeconds := (HH * 360) * (MM * 60) + SS;
+      //          END ELSE BEGIN
+      //            MM := StrToInt(Copy(TotalTimeFromTCPStr, 1, 2));
+      //            SS := StrToInt(Copy(TotalTimeFromTCPStr, 3, 2));
+      //            TotalTimeInSeconds := (MM * 60) + SS;
+      //          END;
+      //
+      //          ElapsedTimeFromTCPStr := Copy(TempNumbersStr, 1, 4);
+      //          IF Length(ElapsedTimeFromTCPStr) = 6 THEN BEGIN
+      //            HH := StrToInt(Copy(ElapsedTimeFromTCPStr, 1, 2));
+      //            MM := StrToInt(Copy(ElapsedTimeFromTCPStr, 3, 2));
+      //            SS := StrToInt(Copy(ElapsedTimeFromTCPStr, 5, 2));
+      //            ElapsedTimeInSeconds := (HH * 360) * (MM * 60) + SS;
+      //          END ELSE BEGIN
+      //            MM := StrToInt(Copy(ElapsedTimeFromTCPStr, 1, 2));
+      //            SS := StrToInt(Copy(ElapsedTimeFromTCPStr, 3, 2));
+      //            ElapsedTimeInSeconds := (MM * 60) + SS;
+      //          END;
+      //
+      //          { Convert the difference to a percentage }
+      //          Percentage := 100 DIV (TotalTimeInSeconds DIV ElapsedTimeInSeconds);
+      //          PercentageStr := IntToStr(Percentage) + '%';
+      //
+      //          ImageLabel.Caption := TempFileName2 + ' ' + PercentageStr;
+      //        END;
+
+              { And prepare a border around the image so we can see which one we've selected. We're using a TShape control rather than FrameRect as it's a control and is
+                permanent.
+              }
+              ImageFocusRectangle := TShape.Create(NIL);
+              WITH ImageFocusRectangle DO BEGIN
+                Parent := AParent;
+                Pen.Color := clAqua;
+                Pen.Width := 5;
+                Visible := False;
+                Shape := stRectangle;
+                Brush.Style := bsClear;
+                OnMouseDown := ImageViewUnitForm.MouseDownEvent;
+                Hint := TempFileName;
+              END; {WITH}
+            END;
+
+            Inc(ImageCount);
+            IF ImageCount = EligibleFiles THEN
+              WriteSplashLoadingLabel(IntToStr(EligibleFiles) + ' Files Loaded')
+            ELSE
+              WriteSplashLoadingLabel(IntToStr(ImageCount) + ' / ' + IntToStr(EligibleFiles) + ' Loaded');
+          END;
+        END;
+
+        Application.ProcessMessages;
+      UNTIL (FindNext(SearchRec) <> 0) OR StopLoading;
 
       IF StopLoading THEN
         Application.Terminate;
@@ -1835,7 +2237,237 @@ BEGIN
   END; {TRY}
 END; { AddEmptyImagesToImageView }
 
-PROCEDURE PositionImages(AParent : TWinControl; SortType : TypeOfSort; OUT CaptionStr : String; Reposition : Boolean);
+PROCEDURE newPositionImages(AParent : TWinControl; SortType : TypeOfSort; OUT CaptionStr : String; Redraw : Boolean);
+{ Fill any gaps that arise, or use for sorting the images }
+
+  {$H-}
+  PROCEDURE KeepDateTimeToStr;
+  { This is here to fool Delphi into not eliminating DateTimeToStr }
+  VAR
+    FunctionPtr : FUNCTION(CONST DateTime: TDateTime): String;
+
+  BEGIN
+    FunctionPtr := @DateTimeToStr;
+  END; { KeepDateTimeToStr }
+  {$H+}
+
+  FUNCTION FileTimeToDateTime(FileTime: TFileTime) : TDateTime;
+  VAR
+    LocalFileTime: TFileTime;
+    SystemTime: TSystemTime;
+
+  BEGIN
+    FileTimeToLocalFileTime(FileTime, LocalFileTime);
+    FileTimeToSystemTime(LocalFileTime, SystemTime);
+    Result := SystemTimeToDateTime(SystemTime);
+  END; { FileTimeToDateTime }
+
+CONST
+  ImageHeight = 165;
+  ImageWidth = 225;
+  TopMargin = 10;
+
+VAR
+  Done : Boolean;
+  FileList : TStringList;
+  FileListCount : Integer;
+//  FileTypeSuffix : String;
+  ImageViewCount : Integer;
+  ImageLeft : Integer;
+  ImageTop : Integer;
+//  LastDotPos : Integer;
+  LeftMargin : Integer;
+  NumberOfImagesPerRow : Integer;
+  NumberStr : string;
+//  SearchRec : TSearchRec;
+//  TempFileName : String;
+tempimage : Timage;
+
+BEGIN
+  TRY
+    IF NOT Initialised THEN BEGIN
+      AddEmptyImagesToImageView(AParent);
+      Initialised := True;
+    END;
+
+    IF IsSplashFormVisible THEN BEGIN
+      WriteSplashLoadingLabel('Sorting Files');
+      Application.ProcessMessages;
+    END;
+
+    CheckImagesInView;
+
+    IF (LastSort = SortType) AND (SortOrder = Ascending) AND NOT Redraw THEN
+      SortOrder := Descending
+    ELSE
+      SortOrder := Ascending;
+
+    LastSort := SortType;
+
+    KeepDateTimeToStr;
+
+    { ************** get sort stuff from old positionimages }
+    filelist := nil;
+    try
+
+      CASE SortType OF
+        SortByFileName:
+          BEGIN
+            CustomSortType := SortByFileName;
+            IF SortOrder = Ascending THEN
+              CaptionStr := 'Sorted by file name'
+            ELSE
+              CaptionStr := 'Reverse sorted by file name';
+          END;
+        SortByDate:
+          BEGIN
+            CustomSortType := SortByDate;
+            IF SortOrder = Ascending THEN
+              CaptionStr := 'Sorted by date'
+            ELSE
+              CaptionStr := 'Reverse sorted by date';
+            END;
+        SortByLastAccess:
+          BEGIN
+            CustomSortType := SortByLastAccess;
+            IF SortOrder = Ascending THEN
+              CaptionStr := 'Sorted by last access time'
+            ELSE
+              CaptionStr := 'Reverse sorted by last access time';
+          END;
+        SortByNumericSuffix:
+          BEGIN
+            CustomSortType := SortByNumericSuffix;
+              IF SortOrder = Ascending THEN
+                CaptionStr := 'Sorted by numeric suffix'
+              ELSE
+                CaptionStr := 'Reverse sorted by numeric suffix';
+            END;
+        SortByType:
+          BEGIN
+            CustomSortType := SortByType;
+              IF SortOrder = Ascending THEN
+                CaptionStr := 'Sorted by type'
+              ELSE
+                CaptionStr := 'Reverse sorted by type';
+            END;
+        END; {CASE}
+
+      FileList.CustomSort(SortFiles);
+
+      NumberOfImagesPerRow := ImageViewUnitForm.Width DIV (ImageWidth + 10);
+      LeftMargin := (ImageViewUnitForm.Width - ((ImageWidth + 10) * NumberOfImagesPerRow)) DIV 2;
+      ImageLeft := LeftMargin;
+      ImageTop := TopMargin;
+
+//  WITH ImageViewUnitForm DO BEGIN
+//    I := 0;
+//    WHILE (I < ImageViewUnitForm.ControlCount) DO BEGIN
+//      IF Controls[I] IS TImage THEN BEGIN
+//        WITH TImage(ImageViewUnitForm.Controls[I]) DO BEGIN
+//          IF NOT Visible THEN BEGIN
+//            IF PtInRect(Screen.WorkAreaRect, Point(Left, Top))
+//            OR PtInRect(Screen.WorkAreaRect, Point(Left + Width, Top + Height))
+//            THEN BEGIN
+//              IF GetFileNumberSuffixFromSnapFile(Hint, IsJPEG, NumberStr) THEN BEGIN
+//                IF IsJPEG THEN BEGIN
+//                  IF NumberStr = '' THEN
+//                    LoadAndConvertImage(PathName + 'Snaps\' + Hint + '.jpg', Image)
+//                  ELSE;
+//                    LoadAndConvertImage(PathName + 'Snaps\' + Hint + '.jpg.' + NumberStr, Image);
+//                END;
+//                Visible := True;
+//              END;
+//            END;
+//          END;
+//        END; {WITH}
+//      END;
+//      Inc(I);
+//    END; {WHILE}
+//  END; {WITH}
+
+
+      FileListCount := 0;
+      WHILE FileListCount < FileList.Count DO BEGIN
+        Done := False;
+        ImageViewCount := 0;
+//        WHILE (ImageViewCount < ImageViewUnitForm.ControlCount) AND NOT Done DO BEGIN
+//          IF ImageViewUnitForm.Controls[ImageViewCount] IS TImage THEN BEGIN
+//            IF TImage(ImageViewUnitForm.Controls[ImageViewCount]).Hint = FileList.Names[FileListCount] THEN BEGIN
+        WHILE (ImageViewCount <= ImageViewUnitForm.ControlCount - 3) AND NOT Done DO BEGIN
+//if ImageViewCount = 30 then
+//null;
+//          IF ImageViewUnitForm.Controls[ImageViewCount] IS TImage THEN
+//            null;
+//          IF ImageViewUnitForm.Controls[ImageViewCount + 1] IS TLabel THEN
+//            null;
+//          IF ImageViewUnitForm.Controls[ImageViewCount + 2] IS Tshape THEN
+//            null;
+//
+          IF ImageViewUnitForm.Controls[ImageViewCount + 2] IS TShape THEN BEGIN
+            IF TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Hint = FileList.Names[FileListCount] THEN BEGIN
+  null;
+//
+              Done := True;
+
+              TImage(ImageViewUnitForm.Controls[ImageViewCount]).Width := ImageWidth;
+              TImage(ImageViewUnitForm.Controls[ImageViewCount]).Height := ImageHeight;
+              TImage(ImageViewUnitForm.Controls[ImageViewCount]).Left := ImageLeft;
+              TImage(ImageViewUnitForm.Controls[ImageViewCount]).Top := ImageTop;
+              TImage(ImageViewUnitForm.Controls[ImageViewCount]).Visible := False;
+//
+              TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Width := ImageWidth;
+              TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Left := ImageLeft;
+              TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Top := ImageTop + ImageHeight;
+              TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Visible := True;
+
+              TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Width := ImageWidth + 10;
+              TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Height := ImageHeight + 25;
+              TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Left := ImageLeft - 5;
+              TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Top := ImageTop - 5;
+              TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Visible := False;
+
+  WITH TImage(ImageViewUnitForm.Controls[ImageViewCount]) DO BEGIN
+    IF NOT Visible THEN BEGIN
+      IF PtInRect(Screen.WorkAreaRect, Point(Left, Top))
+      OR PtInRect(Screen.WorkAreaRect, Point(Left + Width, Top + Height))
+      THEN BEGIN
+        ImageViewUnitForm.Caption := TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Caption;
+        TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Caption := TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Caption + ' VIS';
+        IF GetFileNumberSuffixFromSnapFile(Hint, NumberStr) THEN BEGIN
+          TempImage := TImage(ImageViewUnitForm.Controls[ImageViewCount]);
+          LoadAndConvertImage(PathName + 'Snaps\' + FileList.Names[FileListCount] + '.jpg.' + NumberStr, tempimage);
+          TempImage.Visible := True;
+        END;
+      END;
+    END;
+  END;
+
+              Inc(ImageLeft, ImageWidth + 10);
+              IF (ImageLeft + ImageWidth + 10) > ImageViewUnitForm.Width THEN BEGIN
+                ImageLeft := LeftMargin;
+                Inc(ImageTop, ImageHeight + 30);
+              END;
+            END;
+          END;
+          Inc(ImageViewCount, 3);
+        END; {WHILE}
+
+        Inc(FileListCount);
+      END; {WHILE}
+
+      IF IsSplashFormVisible THEN
+        HideSplashForm;
+    FINALLY
+      FileList.Free;
+    END;
+  EXCEPT
+    ON E : Exception DO
+      ShowMessage('PositionImages: ' + E.ClassName +' error raised, with message: ' + E.Message);
+  END;
+END; { newPositionImages }
+
+PROCEDURE PositionImages(AParent : TWinControl; SortType : TypeOfSort; OUT CaptionStr : String; Redraw : Boolean);
 { Fill any gaps that arise, or use for sorting the images }
 
   FUNCTION FileTimeToDateTime(FileTime: TFileTime) : TDateTime;
@@ -1858,13 +2490,18 @@ VAR
   Done : Boolean;
   FileList : TStringList;
   FileListCount : Integer;
+  FilesSeenTodayCount : Integer;
+  FilesSeenTodayList : TStringList;
   FileTypeSuffix : String;
+  FunctionPtr : FUNCTION(CONST DateTime: TDateTime): String;
+  FileToBeHiddenFound : Boolean;
   ImageViewCount : Integer;
   ImageLeft : Integer;
   ImageTop : Integer;
   LastDotPos : Integer;
   LeftMargin : Integer;
   NumberOfImagesPerRow : Integer;
+  NumberStr : String;
   SearchRec : TSearchRec;
 
 BEGIN
@@ -1874,16 +2511,32 @@ BEGIN
       Initialised := True;
     END;
 
+    IF IsSplashFormVisible THEN BEGIN
+      WriteSplashLoadingLabel('Sorting Files');
+      Application.ProcessMessages;
+    END;
+
     CheckImagesInView;
 
-    IF (LastSort = SortType) AND (SortOrder = Ascending) AND NOT Reposition THEN
+    IF (LastSort = SortType) AND (SortOrder = Ascending) AND NOT Redraw THEN
       SortOrder := Descending
     ELSE
       SortOrder := Ascending;
 
     LastSort := SortType;
 
+    { These are here to fool Delphi into not eliminating these functions, used for debugging }
+    FunctionPtr := @DateTimeToStr;
+    FunctionPtr := @DateToStr;
+
     FileList := TStringList.Create;
+
+    { We need to substitute a character not allowable in a file name for the default equals sign, as a files may well have an equals sign in it }
+    FileList.NameValueSeparator := '?';
+
+    IF HideImagesWhenMoviesPlayedToday THEN
+      FilesSeenTodayList := TStringList.Create;
+
     TRY
       IF (FindFirst(PathName + '*.*', FaAnyFile, SearchRec) = 0) AND NOT StopLoading THEN BEGIN
         TRY
@@ -1891,20 +2544,34 @@ BEGIN
             IF (SearchRec.Name =  '.') OR (SearchRec.Name =  '..') OR IsDirectory(SearchRec.Attr) THEN
               Continue
             ELSE BEGIN
+              IF HideImagesWhenMoviesPlayedToday THEN
+                IF DateToStr(Today) = DateToStr(FileTimeToDateTime(SearchRec.FindData.ftLastAccessTime)) THEN
+                  FilesSeenTodayList.Add(SearchRec.Name);
+
               FormatSettings.ShortDateFormat := 'dd/mm/yyyy';
               FormatSettings.LongTimeFormat := 'hh:mm';
               CASE SortType OF
                 SortByFileName:
-                  FileList.Add(SearchRec.Name + '=');
+                  FileList.Add(SearchRec.Name + FileList.NameValueSeparator);
                 SortByDate:
-                  FileList.Add(SearchRec.Name + '=' + DateToStr(SearchRec.TimeStamp));
+                  FileList.Add(SearchRec.Name + FileList.NameValueSeparator + DateTimeToStr(SearchRec.TimeStamp));
                 SortByLastAccess:
-                  FileList.Add(SearchRec.Name + '=' + DateTimeTostr(FileTimeToDateTime(SearchRec.FindData.ftLastAccessTime)));
+                  FileList.Add(SearchRec.Name + FileList.NameValueSeparator + DateTimeToStr(FileTimeToDateTime(SearchRec.FindData.ftLastAccessTime)));
+                SortByNumericSuffix:
+                  BEGIN
+                    IF GetFileNumberSuffixFromSnapFile(SearchRec.Name, NumberStr) AND (NumberStr <> '') THEN
+                      FileTypeSuffix := NumberStr
+                    ELSE BEGIN
+                      LastDotPos := LastDelimiter('.', SearchRec.Name);
+                      FileTypeSuffix := Copy(SearchRec.Name, LastDotPos + 1);
+                    END;
+                    FileList.Add(SearchRec.Name + FileList.NameValueSeparator + FileTypeSuffix);
+                  END;
                 SortByType:
                   BEGIN
                     LastDotPos := LastDelimiter('.', SearchRec.Name);
                     FileTypeSuffix := Copy(SearchRec.Name, LastDotPos + 1);
-                    FileList.Add(SearchRec.Name + '=' + FileTypeSuffix);
+                    FileList.Add(SearchRec.Name + FileList.NameValueSeparator + FileTypeSuffix);
                   END;
               END; {CASE}
             END;
@@ -1939,6 +2606,14 @@ BEGIN
             ELSE
               CaptionStr := 'Reverse sorted by last access time';
           END;
+        SortByNumericSuffix:
+          BEGIN
+            CustomSortType := SortByNumericSuffix;
+              IF SortOrder = Ascending THEN
+                CaptionStr := 'Sorted by numeric suffix'
+              ELSE
+                CaptionStr := 'Reverse sorted by numeric suffix';
+            END;
         SortByType:
           BEGIN
             CustomSortType := SortByType;
@@ -1950,18 +2625,6 @@ BEGIN
         END; {CASE}
 
       FileList.CustomSort(SortFiles);
-
-//      IF Reposition THEN BEGIN
-//        { Clear the form }
-//        FOR I := ImageViewUnitForm.ComponentCount - 1 DOWNTO 0 DO BEGIN
-//          IF ImageViewUnitForm.Controls[i] IS TImage THEN
-//            ImageViewUnitForm.Controls[i].Free;
-//          IF ImageViewUnitForm.Controls[i] IS TLabel THEN
-//            ImageViewUnitForm.Controls[i].Free;
-//          IF ImageViewUnitForm.Controls[i] IS TShape THEN
-//            ImageViewUnitForm.Controls[i].Free;
-//        END;
-//      END;
 
       NumberOfImagesPerRow := ImageViewUnitForm.Width DIV (ImageWidth + 10);
       LeftMargin := (ImageViewUnitForm.Width - ((ImageWidth + 10) * NumberOfImagesPerRow)) DIV 2;
@@ -1977,22 +2640,58 @@ BEGIN
             IF TImage(ImageViewUnitForm.Controls[ImageViewCount]).Hint = FileList.Names[FileListCount] THEN BEGIN
               Done := True;
 
+              { Are we hiding today's seen images? }
+              IF HideImagesWhenMoviesPlayedToday THEN BEGIN
+                FilesSeenTodayCount := 0;
+                FileToBeHiddenFound := False;
+                WHILE (FilesSeenTodayCount < FilesSeenTodayList.Count) AND NOT FileToBeHiddenFound DO BEGIN
+                  IF FilesSeenTodayList[FilesSeenTodayCount] = FileList.Names[FileListCount] THEN BEGIN
+                    FileToBeHiddenFound := True;
+                    TImage(ImageViewUnitForm.Controls[ImageViewCount]).Visible := False;
+                  END;
+
+                  Inc(FilesSeenTodayCount);
+                END; {WHILE}
+              END;
+
+              { First the image }
+              TImage(ImageViewUnitForm.Controls[ImageViewCount]).Width := ImageWidth;
+              TImage(ImageViewUnitForm.Controls[ImageViewCount]).Height := ImageHeight;
               TImage(ImageViewUnitForm.Controls[ImageViewCount]).Left := ImageLeft;
               TImage(ImageViewUnitForm.Controls[ImageViewCount]).Top := ImageTop;
-              TImage(ImageViewUnitForm.Controls[ImageViewCount]).Visible := True;
+              IF NOT FileToBeHiddenFound THEN
+                TImage(ImageViewUnitForm.Controls[ImageViewCount]).Visible := True
+              ELSE
+                TImage(ImageViewUnitForm.Controls[ImageViewCount]).Visible := False;
 
+              { Then the caption }
+              TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Width := ImageWidth;
               TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Left := ImageLeft;
               TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Top := ImageTop + ImageHeight;
-              TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Visible := True;
 
+              IF HideImagesWhenMoviesPlayedToday THEN
+                TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Font.Color := clMaroon
+              ELSE
+                TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Font.Color := clBlack;
+
+              IF NOT FileToBeHiddenFound THEN
+                TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Visible := True
+              ELSE
+                TLabel(ImageViewUnitForm.Controls[ImageViewCount + 1]).Visible := False;
+
+              { And finally the box around the image and caption }
+              TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Width := ImageWidth + 10;
+              TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Height := ImageHeight + 25;
               TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Left := ImageLeft - 5;
               TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Top := ImageTop - 5;
-              TShape(ImageViewUnitForm.Controls[ImageViewCount]).Visible := True;
+              TShape(ImageViewUnitForm.Controls[ImageViewCount + 2]).Visible := False;
 
-              Inc(ImageLeft, ImageWidth + 10);
-              IF (ImageLeft + ImageWidth + 10) > ImageViewUnitForm.Width THEN BEGIN
-                ImageLeft := LeftMargin;
-                Inc(ImageTop, ImageHeight + 30);
+              IF NOT FileToBeHiddenFound THEN BEGIN
+                Inc(ImageLeft, ImageWidth + 10);
+                IF (ImageLeft + ImageWidth + 10) > ImageViewUnitForm.Width THEN BEGIN
+                  ImageLeft := LeftMargin;
+                  Inc(ImageTop, ImageHeight + 30);
+                END;
               END;
             END;
           END;
@@ -2001,6 +2700,9 @@ BEGIN
 
         Inc(FileListCount);
       END; {WHILE}
+
+      IF IsSplashFormVisible THEN
+        HideSplashForm;
     FINALLY
       FileList.Free;
     END;
@@ -2008,7 +2710,7 @@ BEGIN
     ON E : Exception DO
       ShowMessage('PositionImages: ' + E.ClassName +' error raised, with message: ' + E.Message);
   END;
-END; { PositionImages }
+END; { oldPositionImages }
 
 PROCEDURE TImageViewUnitForm.ImageViewUnitFormKeyDown(Sender : TObject; VAR Key : Word; ShiftState : TShiftState);
 VAR
@@ -2216,7 +2918,7 @@ BEGIN
                 TempSelectedFileName := SelectedFile_Name;
                 FileRenameProc(PathName, SelectedFile_Name + '.d');
                 ClearImageData(TempSelectedFileName + '.d');
-                PositionImages(TWinControl(Sender), LastSort, CaptionStr, Reposition);
+//                PositionImages(TWinControl(Sender), LastSort, CaptionStr, NOT RedrawImages);
               END ELSE BEGIN
                 SaveFileName := SelectedFile_Name;
                 CASE MessageDlg('Permanently delete file "' + PathName + SaveFileName + '"?', mtConfirmation, [mbYes, mbNo], 0, mbNo) OF
@@ -2253,6 +2955,12 @@ BEGIN
                 ClearImageData(TempSelectedFileName);
             END;
 
+          Ord('B'):
+            If IsProgramRunning('zplayer.exe') then
+              ImageViewUnitForm.caption := 'running'
+            else
+              ImageViewUnitForm.caption := 'not running';
+
           Ord('D'):
             { reorder the images by date }
             BEGIN
@@ -2262,7 +2970,7 @@ BEGIN
               WITH VertScrollBar DO
                 Position := 0;
               ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By Date - please wait';
-              PositionImages(TWinControl(Sender), SortByDate, CaptionStr, NOT Reposition);
+              PositionImages(TWinControl(Sender), SortByDate, CaptionStr, NOT RedrawImages);
               ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
 
               Screen.Cursor := SaveCursor;
@@ -2281,7 +2989,7 @@ BEGIN
                 WITH VertScrollBar DO
                   Position := 0;
                 ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By File Name - please wait';
-                PositionImages(TWinControl(Sender), SortByFileName, CaptionStr, NOT Reposition);
+                PositionImages(TWinControl(Sender), SortByFileName, CaptionStr, NOT RedrawImages);
                 ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
               END;
 
@@ -2289,10 +2997,24 @@ BEGIN
             END;
 
           Ord('G'):
-            IF Copy(SelectedFile_Name, 1, 3) = 'st-' THEN
-              FileRenameProc(PathName, Copy(SelectedFile_Name, 4))
-            ELSE
-              FileRenameProc(PathName, 'st-' + SelectedFile_Name);
+            IF SelectedFile_Name <> '' THEN BEGIN
+              IF Copy(SelectedFile_Name, 1, 3) = 'st-' THEN
+                FileRenameProc(PathName, Copy(SelectedFile_Name, 4))
+              ELSE
+                FileRenameProc(PathName, 'st-' + SelectedFile_Name);
+            END;
+
+          Ord('H'):
+            BEGIN
+              IF NOT HideImagesWhenMoviesPlayedToday THEN BEGIN
+                HideImagesWhenMoviesPlayedToday := True;
+                ImageViewUnitForm.Caption := 'HideImagesWhenMoviesPlayedToday now ON';
+              END ELSE BEGIN
+                HideImagesWhenMoviesPlayedToday := False;
+                ImageViewUnitForm.Caption := 'HideImagesWhenMoviesPlayedToday now OFF';
+              END;
+              PositionImages(TWinControl(Sender), LastSort, CaptionStr, RedrawImages);
+            END;
 
           Ord('L'):
             { reorder the listview by last access time }
@@ -2303,7 +3025,7 @@ BEGIN
               WITH VertScrollBar DO
                 Position := 0;
               ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By Last Access Time Name - please wait';
-              PositionImages(TWinControl(Sender), SortByLastAccess, CaptionStr, NOT Reposition);
+              PositionImages(TWinControl(Sender), SortByLastAccess, CaptionStr, NOT RedrawImages);
               ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
 
               Screen.Cursor := SaveCursor;
@@ -2324,16 +3046,27 @@ BEGIN
             END;
 
           Ord('O'):
-            IF Copy(SelectedFile_Name, 1, 3) = 'so-' THEN
-              FileRenameProc(Pathname, Copy(SelectedFile_Name, 4))
-            ELSE
-              FileRenameProc(PathName, 'so-' + SelectedFile_Name);
-
+            IF SelectedFile_Name <> '' THEN BEGIN
+              IF Copy(SelectedFile_Name, 1, 3) = 'so-' THEN
+                FileRenameProc(Pathname, Copy(SelectedFile_Name, 4))
+              ELSE
+                FileRenameProc(PathName, 'so-' + SelectedFile_Name);
+            END;
           Ord('P'):
-            IF Copy(SelectedFile_Name, 1, 3) = 'sp-' THEN
-              FileRenameProc(PathName, Copy(SelectedFile_Name, 4))
-            ELSE
-              FileRenameProc(PathName, 'sp-' + SelectedFile_Name);
+            IF SelectedFile_Name <> '' THEN BEGIN
+              IF Copy(SelectedFile_Name, 1, 3) = 'sp-' THEN
+                FileRenameProc(PathName, Copy(SelectedFile_Name, 4))
+              ELSE
+                FileRenameProc(PathName, 'sp-' + SelectedFile_Name);
+            END;
+
+          Ord('S'):
+            IF SelectedFile_Name <> '' THEN BEGIN
+              IF Copy(SelectedFile_Name, 1, 2) = 's-' THEN
+                FileRenameProc(PathName, Copy(SelectedFile_Name, 3))
+              ELSE
+                FileRenameProc(PathName, 's-' + SelectedFile_Name);
+            END;
 
           Ord('T'):
             { reorder the listview by file type }
@@ -2342,20 +3075,39 @@ BEGIN
                 Position := 0;
 
               ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By File Type - please wait';
-              PositionImages(TWinControl(Sender), SortByType, CaptionStr, NOT Reposition);
+              PositionImages(TWinControl(Sender), SortByType, CaptionStr, NOT RedrawImages);
               ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
             END;
 
           Ord('V'):
-            IF Copy(SelectedFile_Name, 1, 2) = 'v-' THEN
-              FileRenameProc(PathName, Copy(SelectedFile_Name, 3))
+            IF SelectedFile_Name <> '' THEN BEGIN
+              IF Copy(SelectedFile_Name, 1, 2) = 'v-' THEN
+                FileRenameProc(PathName, Copy(SelectedFile_Name, 3))
+              ELSE
+                FileRenameProc(PathName, 'v-' + SelectedFile_Name);
+            END;
+
+          Ord('X'):
+            { reorder the listview by numeric file suffix }
+            BEGIN
+              WITH VertScrollBar DO
+                Position := 0;
+
+              ImageViewUnitForm.Caption := PathName + ' ' + 'Sorting Images By File Numeric Suffix - please wait';
+              PositionImages(TWinControl(Sender), SortByNumericSuffix, CaptionStr, NOT RedrawImages);
+              ImageViewUnitForm.Caption := PathName + ' ' + CaptionStr + GetImageViewCaptionFileNumbers;
+            END;
+
+          Ord('Z'):
+            IF ZoomPlayerUnitForm.Visible THEN
+              ZoomPlayerUnitForm.Visible := False
             ELSE
-              FileRenameProc(PathName, 'v-' + SelectedFile_Name);
+              ZoomPlayerUnitForm.Visible := True;
 
           vk_F3 :
             BEGIN
               FindNextFlag := True;
-              ImageViewUnitFindDialogFind(Self); //Execute;
+              ImageViewUnitFindDialogFind(Self);
             END;
 
           vk_Up:
@@ -2400,19 +3152,22 @@ BEGIN
     IF NOT Initialised THEN BEGIN
       IF (SortStr = 'FILENAMESORT') OR (SortStr = 'SIZESORT') THEN
         { size sort makes no sense for image view }
-        PositionImages(Self, SortByFileName, CaptionStr, NOT Reposition)
+        PositionImages(Self, SortByFileName, CaptionStr, NOT RedrawImages)
       ELSE
         IF SortStr = 'DATESORT' THEN
-          PositionImages(Self, SortByDate, CaptionStr, NOT Reposition)
+          PositionImages(Self, SortByDate, CaptionStr, NOT RedrawImages)
         ELSE
           IF SortStr = 'LASTACCESSSORT' THEN
-            PositionImages(Self, SortByLastAccess, CaptionStr, NOT Reposition)
+            PositionImages(Self, SortByLastAccess, CaptionStr, NOT RedrawImages)
           ELSE
-            IF SortStr = 'TYPESORT' THEN
-              PositionImages(Self, SortByType, CaptionStr, NOT Reposition);
+            IF SortStr = 'NUMERICSUFFIXSORT' THEN
+              PositionImages(Self, SortByNumericSuffix, CaptionStr, NOT RedrawImages)
+            ELSE
+              IF SortStr = 'TYPESORT' THEN
+                PositionImages(Self, SortByType, CaptionStr, NOT RedrawImages);
 
-      IF IsSplashFormVisible THEN
-        HideSplashForm;
+//      IF IsSplashFormVisible THEN
+//        HideSplashForm;
     END;
   EXCEPT
     ON E : Exception DO
@@ -2429,7 +3184,7 @@ PROCEDURE TImageViewUnitForm.AppDeactivate(Sender : TObject);
 BEGIN
   IF ImageViewUnitForm.Visible THEN BEGIN
     IF PositionImagesFlag THEN BEGIN
-      //RepositionImages;
+      //RedrawImagesImages;
       PositionImagesFlag := False;
     END;
   END;
@@ -2447,8 +3202,5 @@ BEGIN
 
   CheckImagesInView;
 END; { WMVScroll }
-
-//                if tempfilename = 'simpsons test file 10.wmv' then
-//                null;
 
 END { ImageViewUnit }.

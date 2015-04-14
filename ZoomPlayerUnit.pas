@@ -732,7 +732,10 @@ END; { ZoomPlayerUnitClearButtonClick }
 PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitTimerTick(Sender: TObject);
 BEGIN
   IF UnableToConnectToZoomPlayer THEN BEGIN
-    IF IsProgramRunning('zplayer.exe') THEN BEGIN
+    IF NOT IsProgramRunning('zplayer.exe') THEN
+//      ZoomPlayerUnitMsgMemo.Lines.Add('Zoom Player is allegedly not running')
+    ELSE BEGIN
+      ZoomPlayerUnitMsgMemo.Lines.Add('Zoom Player is running = attempting close');
       CloseProgram('Zoom Player');
       UnableToConnectToZoomPlayer := False;
       ZoomPlayerUnitTimer.Enabled := False;

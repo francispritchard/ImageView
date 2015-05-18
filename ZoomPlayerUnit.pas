@@ -52,6 +52,8 @@ TYPE
     PROCEDURE ZoomPlayerTCPSendText(S : String);
   END;
 
+PROCEDURE CloseZoomPlayer;
+PROCEDURE CreateClient;
 
 VAR
   ConnectTS : Int64;
@@ -68,7 +70,7 @@ IMPLEMENTATION
 
 {$R *.dfm}
 
-USES ImageViewUnit;
+USES ImageViewUnit, ShellAPI;
 
 FUNCTION IsProgramRunning(ProgramName : String) : Boolean; External 'ListFilesDLLProject.dll'
 { Checks to see if a given program is running }
@@ -178,14 +180,23 @@ BEGIN
     SendMessage(I, ZoomPlayerCode, GlobalAddAtom(PChar(ZoomPlayerUnitForm.Caption)), 200);
 END; { WinAPIConnectButtonClick }
 
-PROCEDURE CloseProgram(ProgramName : PWideChar);
+PROCEDURE CloseZoomPlayer;
 VAR
-  MyHandle: THandle;
+  ShellStr : WideString;
+  ShellStrPtr : PWideChar;
 
 BEGIN
-  MyHandle := FindWindow(NIL, ProgramName);
-  SendMessage(MyHandle, WM_CLOSE, 0, 0);
-END; { CloseProgram }
+//  ShellStr := '/close';
+//
+//  ShellStrPtr := Addr(ShellStr[1]);
+//
+//  ShellExecute(ImageViewUnitForm.Handle,
+//               'open',
+//               '"C:\Program Files (x86)\Zoom Player\zplayer.exe"',
+//               ShellStrPtr,
+//               NIL,
+//               SW_SHOWNORMAL);
+END; { CloseZoomPlayer; }
 
 PROCEDURE TZoomPlayerUnitForm.FormClose(Sender : TObject; VAR Action : TCloseAction);
 BEGIN
@@ -193,13 +204,21 @@ BEGIN
     DestroyZoomPlayerTCPClient;
 END; { FormClose }
 
-PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitTCPConnectButtonClick(Sender : TObject);
+PROCEDURE CreateClient;
 VAR
   OK : Boolean;
 
 BEGIN
+  ZoomPlayerUnitForm.CreateZoomPlayerTCPClient(OK)
+END; { CreateClient }
+
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitTCPConnectButtonClick(Sender : TObject);
+//VAR
+//  OK : Boolean;
+
+BEGIN
   IF ZoomPlayerTCPSocket = NIL THEN
-    CreateZoomPlayerTCPClient(OK)
+    CreateClient
   ELSE
     DestroyZoomPlayerTCPClient;
 END; { TCPConnectButtonClick }
@@ -280,17 +299,17 @@ BEGIN
 
   TRY
     ZoomPlayerTCPClient.Active := True;
-      REPEAT
-        Application.ProcessMessages;
-      UNTIL ZoomPlayerTCPSocket = NIL;
+    REPEAT
+      Application.ProcessMessages;
+    UNTIL ZoomPlayerTCPSocket = NIL;
 
-      I := 0;
-      WHILE (ZoomPlayerTCPSocket = NIL) AND (I < 100) DO BEGIN
-        Application.ProcessMessages;
-        IF ZoomPlayerTCPSocket = NIL THEN
-          Sleep(1000); { increased from 100 31/12/12 }
-        Inc(I);
-      END;
+    I := 0;
+    WHILE (ZoomPlayerTCPSocket = NIL) AND (I < 100) DO BEGIN
+      Application.ProcessMessages;
+//        IF ZoomPlayerTCPSocket = NIL THEN
+//          Sleep(5000); { increased from 100 31/12/12 }
+      Inc(I);
+    END;
   EXCEPT
     FreeAndNIL(ZoomPlayerTCPClient);
     ZoomPlayerUnitMsgMemo.Lines.Add('*** Unable to Connect');
@@ -319,13 +338,12 @@ BEGIN
   ZoomPlayerUnitTCPConnectButton.Caption := 'TCP Disconnect';
 END; { ZoomPlayerTCPClientConnect }
 
-PROCEDURE TZoomPlayerUnitForm.ZoomPlayerTCPClientDisconnect(Sender : TObject; Socket : TCustomWinSocket);
-VAR
-  I : Integer;
+PROCEDURE UpdateElapsedTimeOnClose;
+{ When a video has ceased playing, update the elapsed time }
 
   FUNCTION SetFileLastAccessTime(TempFileName : String; NewDateTime : TDateTime) : Boolean;
   VAR
-    FileHandle : Integer;
+    FileHandle : THandle;
     FileTime : TFileTime;
     LastFileTime : TFileTime;
     LastSystemTime : TSystemTime;
@@ -358,42 +376,55 @@ VAR
     END; {TRY}
   END; { SetFileLastAccessTime }
 
+VAR
+  I : Integer;
+
 BEGIN
   TRY
     WITH SelectedFileRec DO BEGIN
-      IF ZoomPlayerTCPClient <> NIL THEN BEGIN
-
-        ZoomPlayerUnitMsgMemo.Lines.Add('*** Disconnected' + CRLF);
-        ZoomPlayerUnitTCPConnectButton.Enabled := True;
-        ZoomPlayerUnitTCPConnectButton.Caption := 'TCP Connect';
-        ZoomPlayerTCPSocket := NIL;
-
-        { FWP additions }
-        IF ZoomPlayerErrorFound THEN
-          { do nothing to the filename }
-          ZoomPlayerErrorFound := False
-        ELSE BEGIN
-          IF EndOfFile THEN BEGIN
-            ElapsedTimeFromTCPStr := '';
-            TotalTimeFromTCPStr := '';
-            EndOfFile := False;
-          END;
-
-          IF TryStrToInt(ElapsedTimeFromTCPStr, I) THEN BEGIN
-            { do not record times less than 5 seconds }
-            IF I < 5 THEN
-              SnapFileNumberRename(SelectedFile_Name, '')
-            ELSE
-              SnapFileNumberRename(SelectedFile_Name, ElapsedTimeFromTCPStr);
-
-            { Update the last access time, as Zoom Player doesn't seem to do it }
-            SetFileLastAccessTime(PathName + SelectedFile_Name, Now);
-          END;
-        END;
+      IF EndOfFile THEN BEGIN
         ElapsedTimeFromTCPStr := '';
         TotalTimeFromTCPStr := '';
+        EndOfFile := False;
       END;
+
+      IF TryStrToInt(ElapsedTimeFromTCPStr, I) THEN BEGIN
+        { do not record times less than 5 seconds }
+        IF I < 5 THEN
+          SnapFileNumberRename(SelectedFile_Name, '')
+        ELSE
+          SnapFileNumberRename(SelectedFile_Name, ElapsedTimeFromTCPStr);
+
+        { Update the last access time, as Zoom Player doesn't seem to do it }
+        SetFileLastAccessTime(PathName + SelectedFile_Name, Now);
+      END;
+
+      ElapsedTimeFromTCPStr := '';
+      TotalTimeFromTCPStr := '';
     END; {WITH}
+  EXCEPT
+    ON E : Exception DO
+      ShowMessage('UpdateElapsedTimeOnClose: ' + E.ClassName +' error raised, with message : ' + E.Message);
+  END; {TRY}
+END; { UpdateElapsedTimeOnClose }
+
+PROCEDURE TZoomPlayerUnitForm.ZoomPlayerTCPClientDisconnect(Sender : TObject; Socket : TCustomWinSocket);
+BEGIN
+  TRY
+    IF ZoomPlayerTCPClient <> NIL THEN BEGIN
+
+      ZoomPlayerUnitMsgMemo.Lines.Add('*** Disconnected' + CRLF);
+      ZoomPlayerUnitTCPConnectButton.Enabled := True;
+      ZoomPlayerUnitTCPConnectButton.Caption := 'TCP Connect';
+      ZoomPlayerTCPSocket := NIL;
+
+      { FWP additions }
+      IF ZoomPlayerErrorFound THEN
+        { do nothing to the filename }
+        ZoomPlayerErrorFound := False
+      ELSE
+        UpdateElapsedTimeOnClose;
+    END;
   EXCEPT
     ON E : Exception DO
       ShowMessage('ZoomPlayerTCPClientDisconnect : ' + E.ClassName +' error raised, with message : ' + E.Message);
@@ -430,59 +461,62 @@ BEGIN
 
       LParamStr := '';
       CASE LParamNum Of
-        0000 :
+        0000:
           LParamStr := 'Application Name';
-        0001 :
+        0001:
           LParamStr := 'Application Version';
-        0100 :
+        0100:
           LParamStr := 'Ping';
-        1000 :
+        1000:
           BEGIN
             LParamStr := 'State Change';
             CASE WParamNum OF
-              0 :
+              0:
                 WParamStr := 'Closed';
-              1 :
-                WParamStr := 'Stopped [not DVD]';
-              2 :
+              1:
+                BEGIN
+                  WParamStr := 'Stopped [not DVD]';
+//                  UpdateElapsedTimeOnClose;
+                END;
+              2:
                 WParamStr := 'Paused';
-              3 :
+              3:
                 WParamStr := 'Playing';
             END; {CASE}
           END;
-        1010 :
+        1010:
           BEGIN
             LParamStr := 'Current Fullscreen State';
             CASE WParamNum OF
-              0 :
+              0:
                 WParamStr := 'Windowed';
-              1 :
+              1:
                 WParamStr := 'Fullscreen';
             END; {CASE}
           END;
-        1020 :
+        1020:
           BEGIN
             LParamStr := 'Current FastForward State';
             CASE WParamNum OF
-              0 :
+              0:
                 WParamStr := 'Disabled';
-              1 :
+              1:
                 WParamStr := 'Enabled';
             END; {CASE}
           END;
-        1021 :
+        1021:
           BEGIN
             LParamStr := 'Current Rewind State';
             CASE WParamNum OF
-              0 :
+              0:
                 WParamStr := 'Disabled';
-              1 :
+              1:
                 WParamStr := 'Enabled';
             END; {CASE}
           END;
-        1090 :
+        1090:
           LParamStr := 'Timeline Text';
-        1100 :
+        1100:
           BEGIN
             { decode the elapsed time }
             LParamStr := 'Position Update';
@@ -506,162 +540,162 @@ BEGIN
 
             TotalTimeFromTCPStr := ReplaceStr(TempTimeStr, ':', '');
           END;
-        1110 :
+        1110:
           LParamStr := 'Current Duration';
-        1120 :
+        1120:
           LParamStr := 'Current Position';
-        1130 :
+        1130:
           LParamStr := 'Current Frame Rate (realtime)';
-        1140 :
+        1140:
           LParamStr := 'Estimated Frame Rate';
-        1200 :
+        1200:
           LParamStr := 'OSD Message';
-        1201 :
+        1201:
           LParamStr := 'OSD Message Off';
-        1300 :
+        1300:
           BEGIN
             LParamStr := 'Current Play Mode';
             CASE WParamNum OF
-              0 :
+              0:
                 WParamStr := 'DVD Mode';
-              1 :
+              1:
                 WParamStr := 'Media Mode';
-              2 :
+              2:
                 WParamStr := 'Audio Mode';
             END; {CASE}
           END;
-        1310 :
+        1310:
           LParamStr := 'TV/PC Mode';
-        1400 :
+        1400:
           LParamStr := 'DVD Title Change';
-        1401 :
+        1401:
           LParamStr := 'DVD Title Count';
-        1410 :
+        1410:
           LParamStr := 'DVD Domain Change';
-        1420 :
+        1420:
           LParamStr := 'DVD Menu Mode';
-        1450 :
+        1450:
           LParamStr := 'DVD Unique String';
-        1500 :
+        1500:
           LParamStr := 'DVD Chapter Change';
-        1501 :
+        1501:
           LParamStr := 'DVD Chapter Count';
-        1600 :
+        1600:
           LParamStr := 'DVD/Media Active Audio Track';
-        1601 :
+        1601:
           LParamStr := 'DVD/Media Audio Track Count';
-        1602 :
+        1602:
           LParamStr := 'DVD Audio Name';
-        1700 :
+        1700:
           LParamStr := 'DVD/Media Active Sub';
-        1701 :
+        1701:
           LParamStr := 'DVD/Media Sub Count';
-        1702 :
+        1702:
           LParamStr := 'DVD Sub Name';
-        1704 :
+        1704:
           BEGIN
             LParamStr := 'DVD Sub Disabled';
             CASE WParamNum OF
-              0 :
+              0:
                 WParamStr := 'Sub Visible';
-              1 :
+              1:
                 WParamStr := 'Sub Hidden';
             END; {CASE}
           END;
-        1750 :
+        1750:
           LParamStr := 'DVD Angle Change';
-        1751 :
+        1751:
           LParamStr := 'DVD Angle Count';
-        1800 :
+        1800:
           LParamStr := 'Currently Loaded File';
-        1810 :
+        1810:
           LParamStr := 'Current Playlist...';
-        1811 :
+        1811:
           LParamStr := 'Playlist Change : Number of New Items';
-        1855 :
+        1855:
           BEGIN
             LParamStr := 'End of File';
             EndOfFile := True;
           END;
-        1900 :
+        1900:
           LParamStr := 'File PlayList Pos';
-        1920 :
+        1920:
           BEGIN
             LParamStr := 'Playlist Cleared Acknowledgment';
             PlaylistClearedAcknowledgmentReceived := True;
           END;
-        1950 :
+        1950:
           LParamStr := 'A Play List file was removed';
-        2000 :
+        2000:
           LParamStr := 'Video Resolution';
-        2100 :
+        2100:
           LParamStr := 'Video Frame Rate';
-        2200 :
+        2200:
           LParamStr := 'AR Change';
-        2210 :
+        2210:
           BEGIN
             LParamStr := 'DVD AR Mode Change';
             CASE WParamNum OF
-              0 :
+              0:
                 WParamStr := 'Unknown';
-              1 :
+              1:
                 WParamStr := 'Full-Frame';
-              2 :
+              2:
                 WParamStr := 'Letterbox';
-              3 :
+              3:
                 WParamStr := 'Anamorphic';
             END; {CASE}
           END;
-        2300 :
+        2300:
           LParamStr := 'Current Audio Volume';
-        2400 :
+        2400:
           LParamStr := 'Media Content Tags';
-        2500 :
+        2500:
           LParamStr := 'A CD/DVD Was Inserted';
-        2611 :
+        2611:
           LParamStr := 'Video Display Area X-Ofs';
-        2621 :
+        2621:
           LParamStr := 'Video Display Area Y-Ofs';
-        2631 :
+        2631:
           LParamStr := 'Video Display Area Width';
-        2641 :
+        2641:
           LParamStr := 'Video Display Area Height';
-        2700 :
+        2700:
           LParamStr := 'Play Rate Changed';
-        2710 :
+        2710:
           BEGIN
             LParamStr := 'Random Play State';
             CASE WParamNum OF
-              0 :
+              0:
                 WParamStr := 'Disabled';
-              1 :
+              1:
                 WParamStr := 'Enabled';
             END; {CASE}
           END;
-        3000 :
+        3000:
           BEGIN
             LParamStr := 'ZP Error Message';
             ZoomPlayerErrorFound := True;
           END;
-        3100 :
+        3100:
           LParamStr := 'Nav Dialog Opened';
-        3110 :
+        3110:
           LParamStr := 'Nav Dialog Closed';
-        3200 :
+        3200:
           LParamStr := 'Screen Saver Mode';
-        4000 :
+        4000:
           LParamStr := 'Virtual Keyboard Input Result';
-        5100 :
+        5100:
           LParamStr := 'ZP Function Called';
-        5110 :
+        5110:
           LParamStr := 'ZP ExFunction Called';
-        5120 :
+        5120:
           LParamStr := 'ZP ScanCode Called';
-        6000 :
+        6000:
           LParamStr := 'Shared Items List';
-        6010 :
+        6010:
           LParamStr := 'Add Shared files ack.';
-        9000 :
+        9000:
           LParamStr := 'Flash Mouse Click';
       END; {CASE}
 
@@ -700,19 +734,16 @@ BEGIN
   IF ErrorCode = 10061 THEN BEGIN
     Beep;
     ZoomPlayerUnitMsgMemo.Lines.Add('*** Error #10061 - Unable to Connect');
+//    IF IsProgramRunning('zplayer.exe') THEN
+//      CloseZoomPlayer;
     ShowMessage('Unable to Connect to ZoomPlayer');
     UnableToConnectToZoomPlayer := True;
     ZoomPlayerUnitTimer.Enabled := True;
-//    CloseProgram('Zoom Player');
-//    ZoomPlayerUnitForm.Visible := True;
     ErrorCode := 0;
   END;
 
   IF ErrorCode = 10053 THEN BEGIN
     ZoomPlayerUnitMsgMemo.Lines.Add('*** Error #10053 - Server has disconnected/shutdown');
-//    ShowMessage('Server has disconnected/shutdown');
-//    ZoomPlayerUnitForm.Visible := True;
-//    MakeSound;
     ZoomPlayerUnitForm.ZoomPlayerUnitTCPConnectButtonClick(Sender);
     ErrorCode := 0;
   END;
@@ -731,16 +762,13 @@ END; { ZoomPlayerUnitClearButtonClick }
 
 PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitTimerTick(Sender: TObject);
 BEGIN
-  IF UnableToConnectToZoomPlayer THEN BEGIN
-    IF NOT IsProgramRunning('zplayer.exe') THEN
-//      ZoomPlayerUnitMsgMemo.Lines.Add('Zoom Player is allegedly not running')
-    ELSE BEGIN
-      ZoomPlayerUnitMsgMemo.Lines.Add('Zoom Player is running = attempting close');
-      CloseProgram('Zoom Player');
-      UnableToConnectToZoomPlayer := False;
-      ZoomPlayerUnitTimer.Enabled := False;
-    END;
-  END;
+//  IF UnableToConnectToZoomPlayer THEN BEGIN
+//    IF IsProgramRunning('zplayer.exe') THEN BEGIN
+//      ShowMessage('Unable to Connect to ZoomPlayer');
+//      UnableToConnectToZoomPlayer := False;
+//      ZoomPlayerUnitTimer.Enabled := False;
+//    END;
+//  END;
 END; { ZoomPlayerTimerTick }
 
 END { ZoomPlayerUnit}.

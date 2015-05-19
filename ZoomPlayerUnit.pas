@@ -56,6 +56,15 @@ PROCEDURE CloseZoomPlayer;
 PROCEDURE CreateClient;
 
 VAR
+  ZoomPlayerUnitForm : TZoomPlayerUnitForm;
+
+IMPLEMENTATION
+
+{$R *.dfm}
+
+USES ImageViewUnit, ShellAPI;
+
+VAR
   ConnectTS : Int64;
   ElapsedTimeFromTCPStr : String;
   TCPBuf : String;
@@ -64,13 +73,9 @@ VAR
   UnableToConnectToZoomPlayer : Boolean = False;
   ZoomPlayerTCPClient : TClientSocket    = NIL;
   ZoomPlayerTCPSocket : TCustomWinSocket = NIL;
-  ZoomPlayerUnitForm : TZoomPlayerUnitForm;
 
-IMPLEMENTATION
-
-{$R *.dfm}
-
-USES ImageViewUnit, ShellAPI;
+CONST
+  OutStr = True;
 
 FUNCTION IsProgramRunning(ProgramName : String) : Boolean; External 'ListFilesDLLProject.dll'
 { Checks to see if a given program is running }
@@ -85,6 +90,20 @@ BEGIN
     S := ' '+S;
   Result := S;
 END; { FillSpace }
+
+PROCEDURE WriteToDebugFileWithZoomPlayerData(S : String; OutStr : Boolean);
+BEGIN
+  IF OutStr THEN
+    WriteToDebugFile('OUT '
+                     + FillSpace(IntToStr(GetTickCount - ConnectTS), 8) + 'ms :'
+                     + ' '
+                     + AnsiString(S))
+  ELSE
+    WriteToDebugFile('IN  '
+                     + FillSpace(IntToStr(GetTickCount - ConnectTS), 8) + 'ms :'
+                     + ' '
+                     + AnsiString(S));
+END; { WriteToDebugFileWithZoomPlayerData }
 
 FUNCTION StringFromAtom(sATOM : ATOM) : String;
 VAR
@@ -106,67 +125,119 @@ VAR
 
 BEGIN
   CASE M.WParam OF
-    1000 : { Play State Changed }
-           BEGIN
-             S := '* Play state changed : ';
-             Case M.LParam of
-               0 : S1 := 'Closed';   // Also DVD Stop
-               1 : S1 := 'Stopped';  // Media only
-               2 : S1 := 'Paused';
-               3 : S1 := 'Playing';
-             END;
-             ZoomPlayerUnitMsgMemo.Lines.Add(S+S1);
-           END;
-    1100 : { TimeLine update (once per second) }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* Timeline : '+ StringFromAtom(M.LParam));
+    1000: { Play State Changed }
+       BEGIN
+         S := '* Play state changed : ';
+         CASE M.LParam of
+           0:
+             S1 := 'Closed';   // Also DVD Stop
+           1:
+             S1 := 'Stopped';  // Media only
+           2:
+             S1 := 'Paused';
+           3:
+             S1 := 'Playing';
+         END;
+         ZoomPlayerUnitMsgMemo.Lines.Add(S + S1);
+         WriteToDebugFileWithZoomPlayerData(S + S1, NOT OutStr);
+       END;
 
-    1200 : { On Screen Display Messages }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* OSD : '+ StringFromAtom(M.LParam));
-    1201 : { On Screen Display MESSAGE has been removed }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* OSD Removed');
+    1100: { TimeLine update (once per second) }
+       BEGIN
+         ZoomPlayerUnitMsgMemo.Lines.Add('* Timeline : ' + StringFromAtom(M.LParam));
+         WriteToDebugFileWithZoomPlayerData('* Timeline : ' + StringFromAtom(M.LParam), NOT OutStr);
+       END;
 
-    1300 : { DVD & Media Mode changes }
-           BEGIN
-             S := '* Mode change : Entering ';
-             Case M.LParam of
-               0 : S1 := 'DVD';
-               1 : S1 := 'Media';
-             END;
-             ZoomPlayerUnitMsgMemo.Lines.Add(S+S1+' mode');
-           END;
+    1200: { On Screen Display Messages }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* OSD : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* OSD : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
 
-    1400 : { DVD Title Change }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Title : ' + IntToStr(M.LParam));
+    1201: { On Screen Display MESSAGE has been removed }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* OSD Removed');
+        WriteToDebugFileWithZoomPlayerData('* OSD Removed', NOT OutStr);
+      END;
 
-    1450 : { Current Unique string identifying the DVD disc }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Unique String : ' + IntToStr(M.LParam));
+    1300: { DVD & Media Mode changes }
+      BEGIN
+        S := '* Mode change : Entering ';
+        CASE M.LParam of
+          0:
+            S1 := 'DVD';
+          1:
+            S1 := 'Media';
+        END;
+        ZoomPlayerUnitMsgMemo.Lines.Add(S + S1 + ' mode');
+        WriteToDebugFileWithZoomPlayerData(S + S1 + ' mode', NOT OutStr);
+      END;
 
-    1500 : { DVD Chapter Change }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Chapter : ' + IntToStr(M.LParam));
+    1400: { DVD Title Change }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Title : ' + IntToStr(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* DVD Title : ' + IntToStr(M.LParam), NOT OutStr);
+      END;
 
-    1600 : { DVD Audio Change }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Audio : ' + StringFromAtom(M.LParam));
+    1450: { Current Unique string identifying the DVD disc }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Unique String : ' + IntToStr(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* DVD Unique String : ' + IntToStr(M.LParam), NOT OutStr);
+      END;
 
-    1700 : { DVD Subtitle Change }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Subtitle : ' + StringFromAtom(M.LParam));
+    1500: { DVD Chapter Change }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Chapter : ' + IntToStr(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* DVD Chapter : ' + IntToStr(M.LParam), NOT OutStr);
+      END;
 
-    1800 : { Media File Name }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* New Media File : ' + StringFromAtom(M.LParam));
+    1600: { DVD Audio Change }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Audio : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* DVD Audio : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
 
-    1855 : { end of file - FWP }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* End of file : ' + StringFromAtom(M.LParam));
+    1700: { DVD Subtitle Change }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* DVD Subtitle : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* DVD Subtitle : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
 
-    1900 : { Position of Media file in play list }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* Media File play list track number : ' + StringFromAtom(M.LParam));
+    1800: { Media File Name }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* New Media File : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* New Media File : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
 
-    2000 : { Video Resolution }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* Video Resolution : ' + StringFromAtom(M.LParam));
+    1855: { end of file - FWP }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* End of file : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* End of file : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
 
-    2100 : { Video Frame Rate }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* Video FPS : ' + StringFromAtom(M.LParam));
+    1900: { Position of Media file in play list }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* Media File play list track number : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* Media File play list track number : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
 
-    2200 : { AR Changed }
-           ZoomPlayerUnitMsgMemo.Lines.Add('* AR Changed to : ' + StringFromAtom(M.LParam));
+    2000: { Video Resolution }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* Video Resolution : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* Video Resolution : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
+
+    2100: { Video Frame Rate }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* Video FPS : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* Video FPS : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
+
+    2200: { AR Changed }
+      BEGIN
+        ZoomPlayerUnitMsgMemo.Lines.Add('* AR Changed to : ' + StringFromAtom(M.LParam));
+        WriteToDebugFileWithZoomPlayerData('* AR Changed to : ' + StringFromAtom(M.LParam), NOT OutStr);
+      END;
   END;
 END; { ZoomPlayerEvent }
 
@@ -313,6 +384,7 @@ BEGIN
   EXCEPT
     FreeAndNIL(ZoomPlayerTCPClient);
     ZoomPlayerUnitMsgMemo.Lines.Add('*** Unable to Connect');
+    WriteToDebugFileWithZoomPlayerData('*** Unable to Connect', NOT OutStr);
     OK := False;
   END;
 END; { CreateZoomPlayerTCPClient }
@@ -334,6 +406,7 @@ BEGIN
   ConnectTS := GetTickCount;
   ZoomPlayerTCPSocket := Socket;
   ZoomPlayerUnitMsgMemo.Lines.Add('*** Connected');
+  WriteToDebugFileWithZoomPlayerData('*** Connected', NOT OutStr);
   ZoomPlayerUnitTCPConnectButton.Enabled := True;
   ZoomPlayerUnitTCPConnectButton.Caption := 'TCP Disconnect';
 END; { ZoomPlayerTCPClientConnect }
@@ -392,8 +465,10 @@ BEGIN
         { do not record times less than 5 seconds }
         IF I < 5 THEN
           SnapFileNumberRename(SelectedFile_Name, '')
-        ELSE
+        ELSE BEGIN
           SnapFileNumberRename(SelectedFile_Name, ElapsedTimeFromTCPStr);
+          WriteToDebugFileWithZoomPlayerData('Setting elapsed time for ' + SelectedFile_Name + ' to be ' + ElapsedTimeFromTCPStr, OutStr);
+        END;
 
         { Update the last access time, as Zoom Player doesn't seem to do it }
         SetFileLastAccessTime(PathName + SelectedFile_Name, Now);
@@ -401,6 +476,13 @@ BEGIN
 
       ElapsedTimeFromTCPStr := '';
       TotalTimeFromTCPStr := '';
+
+(*
+      { A way of getting the focus }
+      ZeroMemory(@Input, SizeOf(Input));
+      SendInput(1, Input, SizeOf(Input)); // don't send anything actually to another app..
+      SetForegroundWindow(ImageViewUnitForm.Handle);//      ImageViewUnitForm.BringToFront;
+*)
     END; {WITH}
   EXCEPT
     ON E : Exception DO
@@ -412,8 +494,8 @@ PROCEDURE TZoomPlayerUnitForm.ZoomPlayerTCPClientDisconnect(Sender : TObject; So
 BEGIN
   TRY
     IF ZoomPlayerTCPClient <> NIL THEN BEGIN
-
       ZoomPlayerUnitMsgMemo.Lines.Add('*** Disconnected' + CRLF);
+      WriteToDebugFileWithZoomPlayerData('*** Disconnected' + CRLF, NOT OutStr);
       ZoomPlayerUnitTCPConnectButton.Enabled := True;
       ZoomPlayerUnitTCPConnectButton.Caption := 'TCP Connect';
       ZoomPlayerTCPSocket := NIL;
@@ -438,6 +520,7 @@ VAR
   LParamStr : String;
   ObliquePos : Integer;
   S : String;
+  TempS : String;
   TempTimeStr : String;
   WParamNum : Integer;
   WParamStr : String;
@@ -521,22 +604,24 @@ BEGIN
             { decode the elapsed time }
             LParamStr := 'Position Update';
 
-            S := Copy(S, 6);
+            TempS := Copy(S, 6);
 
-            ObliquePos := Pos('/', S);
+            IF Copy(TempS, 1, 5) <> '00:00' THEN BEGIN
+              ObliquePos := Pos('/', TempS);
 
-            TempTimeStr := Copy(S, 1, ObliquePos - 2);
-            IF Length(TempTimeStr) = 7 THEN
-              TempTimeStr := '0' + TempTimeStr;
+              TempTimeStr := Copy(TempS, 1, ObliquePos - 2);
+              IF Length(TempTimeStr) = 7 THEN
+                TempTimeStr := '0' + TempTimeStr;
 
-            { remove the colons }
-            ElapsedTimeFromTCPStr := ReplaceStr(TempTimeStr, ':', '');
+              { remove the colons }
+              ElapsedTimeFromTCPStr := ReplaceStr(TempTimeStr, ':', '');
+            END;
 
-            TempTimeStr := Copy(S, ObliquePos + 2);
-            S := Copy(S, ObliquePos + 2);
+            TempTimeStr := Copy(TempS, ObliquePos + 2);
+            TempS := Copy(S, ObliquePos + 2);
 
-            IF Length(S) = 7 THEN
-              TempTimeStr := '0' + S;
+            IF Length(TempS) = 7 THEN
+              TempTimeStr := '0' + TempS;
 
             TotalTimeFromTCPStr := ReplaceStr(TempTimeStr, ':', '');
           END;
@@ -706,6 +791,7 @@ BEGIN
                         + Copy(S, 1, 4)
                         + ' '
                         + LParamStr + IfThen(WParamStr <> '', ' : ' + WParamStr, ' ' + Copy(S, 6)));
+      WriteToDebugFileWithZoomPlayerData(Copy(S, 1, 4) + ' ' + LParamStr + IfThen(WParamStr <> '', ' : ' + WParamStr, ' ' + Copy(S, 6)), NOT OutStr);
 
 // This commented out as program never reaches "If stopped" and the forms remain hidden for ever!
 //        IF Started THEN BEGIN
@@ -734,6 +820,7 @@ BEGIN
   IF ErrorCode = 10061 THEN BEGIN
     Beep;
     ZoomPlayerUnitMsgMemo.Lines.Add('*** Error #10061 - Unable to Connect');
+    WriteToDebugFileWithZoomPlayerData('*** Error #10061 - Unable to Connect', NOT OutStr);
 //    IF IsProgramRunning('zplayer.exe') THEN
 //      CloseZoomPlayer;
     ShowMessage('Unable to Connect to ZoomPlayer');
@@ -744,6 +831,7 @@ BEGIN
 
   IF ErrorCode = 10053 THEN BEGIN
     ZoomPlayerUnitMsgMemo.Lines.Add('*** Error #10053 - Server has disconnected/shutdown');
+    WriteToDebugFileWithZoomPlayerData('*** Error #10053 - Server has disconnected/shutdown', NOT OutStr);
     ZoomPlayerUnitForm.ZoomPlayerUnitTCPConnectButtonClick(Sender);
     ErrorCode := 0;
   END;
@@ -751,8 +839,10 @@ END; { ZoomPlayerTCPClientError }
 
 PROCEDURE TZoomPlayerUnitForm.ZoomPlayerTCPSendText(S : String);
 BEGIN
-  IF ZoomPlayerTCPSocket <> NIL THEN
+  IF ZoomPlayerTCPSocket <> NIL THEN BEGIN
     ZoomPlayerTCPSocket.SendText(AnsiString(S + CRLF));
+    WriteToDebugFileWithZoomPlayerData(S, OutStr);
+  END;
 END; { ZoomPlayerTCPSendText }
 
 PROCEDURE TZoomPlayerUnitForm.ZoomPlayerUnitClearButtonClick(Sender : TObject);

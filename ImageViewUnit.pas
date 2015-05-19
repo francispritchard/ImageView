@@ -1251,6 +1251,7 @@ writetodebugfile('launching zoom player');
                           + '/Max' + ' /MouseOff';
 
               ShellStrPtr := Addr(ShellStr[1]);
+              WriteToDebugFile('executing Zoom Player command: ' + ShellStr);
               ShellExecute(ImageViewUnitForm.Handle,
                            'open',
                            '"C:\Program Files (x86)\Zoom Player\zplayer.exe"',

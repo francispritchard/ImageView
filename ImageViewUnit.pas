@@ -432,6 +432,7 @@ VAR
 BEGIN
   IsJPEG := False;
   Result := False;
+  NumberStr := '';
 
   IF FindFirst(PathName + 'Snaps\' + FileName + '*.*', FaAnyFile, SearchRec) = 0 THEN BEGIN
     { Find the last dot - if there are numbers after it, then we want to copy them }
@@ -1303,7 +1304,7 @@ writetodebugfile('exiting PrepareFiles');
     END; {TRY}
   END; { PrepareFiles }
 
-  PROCEDURE TakeSnapWithVLC(PathName, FileName, StartTimeInSecondsStr, StopTimeInSecondsStr : String; OUT TimedOut : Boolean);
+  PROCEDURE TakeSnapWithVLC(PathName, FileName, StartTimeInSecondsStr, StopTimeInSecondsStr : String; OUT NumberStr : String; OUT TimedOut : Boolean);
   { Press the camera shutter }
   VAR
     OutputFileName : String;
@@ -1316,10 +1317,15 @@ writetodebugfile('exiting PrepareFiles');
     TRY
       StartTimer := GetTickCount();
       TimedOut := False;
+      NumberStr := '';
 
       IF Assigned(ImageViewUnitForm) AND (ImageViewUnitForm.Visible) THEN
-        { does this ever happen? **** }
         ImageViewUnitForm.Caption := 'Taking snap of "' + PathName + FileName + '" from ' + StartTimeInSecondsStr + ' to ' + StopTimeInSecondsStr + ' seconds';
+
+      { Remove and store any numeric suffix so that the new snap replaces the old }
+      GetFileNumberSuffixFromSnapFile(FileName, NumberStr);
+      IF NumberStr <> '' THEN
+        SnapFileNumberRename(FileName, '');
 
       ShellStr := '"' + PathName + FileName + '"'
                   + ' --qt-start-minimized'
@@ -1354,6 +1360,10 @@ writetodebugfile('exiting PrepareFiles');
           TimedOut := True;
         Application.ProcessMessages;
       UNTIL (IsProgramRunning('VLC') = False) OR TimedOut;
+
+      { Now add any stored numeric suffix to the new snap }
+      IF NumberStr <> '' THEN
+        SnapFileNumberRename(FileName, NumberStr);
 
       IF Assigned(ImageViewUnitForm) AND (ImageViewUnitForm.Visible) THEN
         ImageViewUnitForm.Caption := 'Snap taken of "' + PathName + FileName + '" saved as "' + OutputFileName + '"';
@@ -1398,7 +1408,7 @@ BEGIN
               { we need a replacement image - this takes some time so show the hourglass }
               SaveCursor := Screen.Cursor;
               Screen.Cursor := crHourGlass;
-              TakeSnapWithVLC(PathName, SelectedFile_Name, '60', '65', TimedOut);
+              TakeSnapWithVLC(PathName, SelectedFile_Name, '60', '65', NumberStr, TimedOut);
               REPEAT
                 { This waits until VLC has stopped running, or else we load the old image }
                 Application.ProcessMessages;
@@ -1407,7 +1417,7 @@ BEGIN
               Screen.Cursor := SaveCursor;
 
               TempImage := FindSpecificImageOnImageViewUnitForm(SelectedFile_Name);
-              LoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage); { +++ }
+              LoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg.' + NumberStr, TempImage);
             END ELSE
               IF NOT (ssCtrl IN ShiftState) THEN BEGIN
                 { the default }
@@ -1417,7 +1427,7 @@ BEGIN
                 { we need a replacement image - this takes some time so show the hourglass }
                 SaveCursor := Screen.Cursor;
                 Screen.Cursor := crHourGlass;
-                TakeSnapWithVLC(PathName, SelectedFile_Name, '120', '125', TimedOut);
+                TakeSnapWithVLC(PathName, SelectedFile_Name, '120', '125', NumberStr, TimedOut);
                 REPEAT
                   { This waits until VLC has stopped running, or else we load the old image }
                   Application.ProcessMessages;
@@ -1426,7 +1436,7 @@ BEGIN
                 Screen.Cursor := SaveCursor;
 
                 TempImage := FindSpecificImageOnImageViewUnitForm(SelectedFile_Name);
-                LoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg', TempImage); { +++ }
+                LoadAndConvertImage(PathName + 'Snaps\' + SelectedFile_Name + '.jpg.' + NumberStr, TempImage);
               END;
 
           mbRight :
